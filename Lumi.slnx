@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Lumi.Application/Lumi.Application.csproj" />
+  <Project Path="Lumi.Domain/Lumi.Domain.csproj" />
+  <Project Path="Lumi.Infrastructure/Lumi.Infrastructure.csproj" />
+  <Project Path="Lumi.WebAPI/Lumi.WebAPI.csproj" />
+</Solution>

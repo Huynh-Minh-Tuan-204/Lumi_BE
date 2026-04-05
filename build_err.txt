@@ -1,0 +1,14 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Lumi.Domain -> D:\DACK\Lumi_BE\Lumi.Domain\bin\Debug\net8.0\Lumi.Domain.dll
+  Lumi.Application -> d:\DACK\Lumi_BE\Lumi.Application\bin\Debug\net8.0\Lumi.Application.dll
+  Lumi.Infrastructure -> d:\DACK\Lumi_BE\Lumi.Infrastructure\bin\Debug\net8.0\Lumi.Infrastructure.dll
+d:\DACK\Lumi_BE\Lumi.WebAPI\Controllers\ConversationsController.cs(298,58): error CS1061: 'Message' does not contain a definition for 'MessageReads' and no accessible extension method 'MessageReads' accepting a first argument of type 'Message' could be found (are you missing a using directive or an assembly reference?) [d:\DACK\Lumi_BE\Lumi.WebAPI\Lumi.WebAPI.csproj]
+
+Build FAILED.
+
+d:\DACK\Lumi_BE\Lumi.WebAPI\Controllers\ConversationsController.cs(298,58): error CS1061: 'Message' does not contain a definition for 'MessageReads' and no accessible extension method 'MessageReads' accepting a first argument of type 'Message' could be found (are you missing a using directive or an assembly reference?) [d:\DACK\Lumi_BE\Lumi.WebAPI\Lumi.WebAPI.csproj]
+    0 Warning(s)
+    1 Error(s)
+
+Time Elapsed 00:00:01.84

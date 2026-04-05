@@ -1,0 +1,10 @@
+﻿POST https://localhost:7082/api/auth/register
+Content-Type: application/json
+
+{
+  "employeeCode": "NV001",
+  "username": "minhtuan_admin",
+  "password": "SuperSecretPassword123!",
+  "fullName": "Huỳnh Minh Tuấn",
+  "email": "tuan@lumi.com"
+}

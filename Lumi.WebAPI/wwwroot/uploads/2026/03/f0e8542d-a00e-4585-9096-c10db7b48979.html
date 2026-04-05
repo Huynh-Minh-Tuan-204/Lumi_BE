@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lumi Secure Chat Tester</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #f0f2f5; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        input, button { padding: 10px; margin: 5px 0; width: 100%; border-radius: 5px; border: 1px solid #ddd; box-sizing: border-box; }
+        button { background: #0084ff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0073e6; }
+        #status { font-weight: bold; margin: 10px 0; }
+        .success { color: #28a745; } .error { color: #dc3545; }
+        #messagesList { list-style: none; padding: 0; max-height: 200px; overflow-y: auto; border: 1px solid #eee; margin-top: 10px; }
+        #messagesList li { padding: 8px; border-bottom: 1px solid #f9f9f9; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🛡️ Lumi Secure Chat Tester</h2>
+        <div id="status">Trạng thái: <span>Chưa kết nối</span></div>
+        
+        <input type="text" id="tokenInput" placeholder="Dán JWT Access Token vào đây...">
+        <button id="connectBtn">Kết nối vào Hub (Bảo mật JWT)</button>
+        
+        <hr>
+        
+        <input type="text" id="receiverId" placeholder="ID người nhận (ví dụ: 1)">
+        <input type="text" id="messageInput" placeholder="Nhập tin nhắn...">
+        <button id="sendBtn" disabled>Gửi tin nhắn Real-time</button>
+        
+        <ul id="messagesList"></ul>
+    </div>
+
+    <script>
+        let connection = null;
+
+        document.getElementById("connectBtn").onclick = async () => {
+            const token = document.getElementById("tokenInput").value;
+            const statusSpan = document.querySelector("#status span");
+
+            // Cấu hình kết nối SignalR với Query String Token
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl("https://localhost:7082/chatHub?access_token=" + token)
+                .withAutomaticReconnect()
+                .build();
+
+            // Lắng nghe tin nhắn từ Server
+            connection.on("ReceiveMessage", (senderId, message) => {
+                const li = document.createElement("li");
+                li.innerHTML = `<b>User ${senderId}:</b> ${message}`;
+                document.getElementById("messagesList").appendChild(li);
+            });
+
+            try {
+                await connection.start();
+                statusSpan.textContent = "Đã kết nối thành công! ✅";
+                statusSpan.className = "success";
+                document.getElementById("sendBtn").disabled = false;
+            } catch (err) {
+                statusSpan.textContent = "Lỗi: " + err.message + " ❌";
+                statusSpan.className = "error";
+                console.error(err);
+            }
+        };
+
+        document.getElementById("sendBtn").onclick = async () => {
+            const receiverId = document.getElementById("receiverId").value;
+            const message = document.getElementById("messageInput").value;
+            try {
+                await connection.invoke("SendMessage", receiverId, message);
+                const li = document.createElement("li");
+                li.style.color = "#888";
+                li.textContent = "Bạn đã gửi: " + message;
+                document.getElementById("messagesList").appendChild(li);
+            } catch (err) {
+                console.error(err);
+            }
+        };
+    </script>
+</body>
+</html>

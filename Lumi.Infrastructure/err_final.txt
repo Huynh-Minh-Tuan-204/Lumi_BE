@@ -1,0 +1,15 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Lumi.Domain -> D:\DACK\Lumi_BE\Lumi.Domain\bin\Debug\net8.0\Lumi.Domain.dll
+  Lumi.Application -> D:\DACK\Lumi_BE\Lumi.Application\bin\Debug\net8.0\Lumi.Application.dll
+D:\DACK\Lumi_BE\Lumi.Infrastructure\Services\AuthService.cs(176,20): error CS1061: 'IMemoryCache' does not contain a definition for 'Set' and no accessible extension method 'Set' accepting a first argument of type 'IMemoryCache' could be found (are you missing a using directive or an assembly reference?) [D:\DACK\Lumi_BE\Lumi.Infrastructure\Lumi.Infrastructure.csproj]
+D:\DACK\Lumi_BE\Lumi.Infrastructure\Services\AuthService.cs(334,24): error CS1061: 'IMemoryCache' does not contain a definition for 'Set' and no accessible extension method 'Set' accepting a first argument of type 'IMemoryCache' could be found (are you missing a using directive or an assembly reference?) [D:\DACK\Lumi_BE\Lumi.Infrastructure\Lumi.Infrastructure.csproj]
+
+Build FAILED.
+
+D:\DACK\Lumi_BE\Lumi.Infrastructure\Services\AuthService.cs(176,20): error CS1061: 'IMemoryCache' does not contain a definition for 'Set' and no accessible extension method 'Set' accepting a first argument of type 'IMemoryCache' could be found (are you missing a using directive or an assembly reference?) [D:\DACK\Lumi_BE\Lumi.Infrastructure\Lumi.Infrastructure.csproj]
+D:\DACK\Lumi_BE\Lumi.Infrastructure\Services\AuthService.cs(334,24): error CS1061: 'IMemoryCache' does not contain a definition for 'Set' and no accessible extension method 'Set' accepting a first argument of type 'IMemoryCache' could be found (are you missing a using directive or an assembly reference?) [D:\DACK\Lumi_BE\Lumi.Infrastructure\Lumi.Infrastructure.csproj]
+    0 Warning(s)
+    2 Error(s)
+
+Time Elapsed 00:00:03.07
