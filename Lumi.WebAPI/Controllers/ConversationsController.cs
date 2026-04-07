@@ -368,11 +368,12 @@ namespace Lumi.WebAPI.Controllers
                 int userId = int.Parse(userIdStr);
 
                 // Cập nhập IsRead = true cho tất cả tin nhắn của đối phương trong cuộc hội thoại đó
-                var unreadMessages = await _context.Messages
-                    .Where(m => m.ConversationId == id && m.SenderId != userId && m.IsDeleted != true && !m.MessageReads.Any(mr => mr.UserId == userId))
+                var unreadMessageIds = await _context.Messages
+                    .Where(m => m.ConversationId == id && m.SenderId != userId && (m.IsDeleted ?? false) == false && !m.MessageReads.Any(mr => mr.UserId == userId))
+                    .Select(m => m.Id)
                     .ToListAsync();
 
-                if (!unreadMessages.Any()) return NoContent();
+                if (!unreadMessageIds.Any()) return NoContent();
 
                 var device = await _context.UserDevices
                     .Where(ud => ud.UserId == userId && ud.IsActive)
@@ -397,11 +398,11 @@ namespace Lumi.WebAPI.Controllers
                 }
                 int deviceId = device.Id;
 
-                foreach(var msg in unreadMessages)
+                foreach(var msgId in unreadMessageIds)
                 {
                     _context.MessageReads.Add(new MessageRead
                     {
-                        MessageId = msg.Id,
+                        MessageId = msgId,
                         UserId = userId,
                         DeviceId = deviceId,
                         ReadAt = DateTime.UtcNow

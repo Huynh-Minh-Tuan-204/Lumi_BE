@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Lumi.API.Controllers
+namespace Lumi.WebAPI.Controllers
 {
     [ApiController]
     [Route("api/admin/announcements")]

@@ -30,6 +30,7 @@ namespace Lumi.Domain.Entities
         public DateTime? PinnedAt { get; set; }
         public int? PinnedBy { get; set; }
         public string StickerUrl { get; set; }
+        public string Metadata { get; set; } // JSON metadata for categories, titles, etc.
 
         public virtual ICollection<MessageRead> MessageReads { get; set; }
     }

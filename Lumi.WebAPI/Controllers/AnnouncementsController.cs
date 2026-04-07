@@ -40,8 +40,15 @@ namespace Lumi.WebAPI.Controllers
                     return Unauthorized();
 
                 var itemsRaw = await _context.Messages
-                    .Where(m => m.MessageType == "Announcement" && m.IsDeleted != true)
-                    .Include(m => m.Sender)
+                    .Where(m => m.MessageType == "Announcement" && (m.IsDeleted ?? false) == false && !m.EncryptedContent.Contains("ghim") && !m.EncryptedContent.Contains("Ghim"))
+                    .Select(m => new {
+                        m.Id,
+                        m.EncryptedContent,
+                        m.CreatedAt,
+                        m.IV,
+                        m.Metadata,
+                        SenderName = m.Sender != null ? (m.Sender.FullName ?? m.Sender.Username) : "System"
+                    })
                     .OrderByDescending(m => m.CreatedAt)
                     .ToListAsync();
 
@@ -57,14 +64,24 @@ namespace Lumi.WebAPI.Controllers
                         var targetIds = m.IV.Split(',', StringSplitOptions.RemoveEmptyEntries);
                         return targetIds.Any(id => id == userId.ToString());
                     })
-                    .Select(m => new
-                    {
-                        Id = m.Id,
-                        SenderName = (m.Sender != null) ? (m.Sender.FullName ?? m.Sender.Username) : "System",
-                        Message = m.EncryptedContent,
-                        Timestamp = DateTime.SpecifyKind(m.CreatedAt, DateTimeKind.Utc).ToString("o"),
-                        IsSystem = true,
-                        IsRead = userReadMessageIds.Contains(m.Id)
+                    .Select(m => {
+                        var meta = new { title = "Thông báo", category = "General", forceConfirmed = false };
+                        if (!string.IsNullOrEmpty(m.Metadata)) {
+                            try { meta = System.Text.Json.JsonSerializer.Deserialize<dynamic>(m.Metadata); } catch {}
+                        }
+
+                        return new
+                        {
+                            Id = m.Id,
+                            Title = meta?.title ?? "Thông báo",
+                            Category = meta?.category ?? "General",
+                            ForceConfirmed = meta?.forceConfirmed ?? false,
+                            SenderName = m.SenderName ?? "System",
+                            Message = m.EncryptedContent,
+                            Timestamp = DateTime.SpecifyKind(m.CreatedAt, DateTimeKind.Utc).ToString("o"),
+                            IsSystem = true,
+                            IsRead = userReadMessageIds.Contains(m.Id)
+                        };
                     })
                     .ToList();
 
@@ -111,7 +128,8 @@ namespace Lumi.WebAPI.Controllers
                 int deviceId = device.Id;
 
                 var announcements = await _context.Messages
-                    .Where(m => m.MessageType == "Announcement" && m.IsDeleted != true)
+                    .Where(m => m.MessageType == "Announcement" && (m.IsDeleted ?? false) == false)
+                    .Select(m => new { m.Id, m.IV })
                     .ToListAsync();
                 
                 var targetMessageIds = announcements
@@ -151,6 +169,7 @@ namespace Lumi.WebAPI.Controllers
 
         // POST: /api/announcements
         [HttpPost]
+        [Authorize(Roles = "Admin,Manager")]
         public async Task<IActionResult> CreateAnnouncementAsync([FromBody] CreateAnnouncementDto request)
         {
             try 
@@ -183,6 +202,14 @@ namespace Lumi.WebAPI.Controllers
                     targetIdsStr = string.Join(",", request.UserIds);
                 }
 
+                // Metadata JSON
+                var metaJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    title = request.Title,
+                    category = request.Category ?? "General",
+                    forceConfirmed = request.ForceConfirmed
+                });
+
                 var msg = new Message
                 {
                     ConversationId = systemConv.Id,
@@ -190,7 +217,8 @@ namespace Lumi.WebAPI.Controllers
                     EncryptedContent = request.Message,
                     IV = targetIdsStr,
                     MessageType = "Announcement",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    Metadata = metaJson
                 };
 
                 _context.Messages.Add(msg);
@@ -203,26 +231,36 @@ namespace Lumi.WebAPI.Controllers
                 var senderName = sender?.FullName ?? sender?.Username ?? "System";
 
                 // Data for SignalR
-                var payload = new {
+                var signalRData = new {
                     id = msg.Id,
+                    title = request.Title,
                     sender = senderName, 
                     message = request.Message, 
+                    category = request.Category ?? "General",
+                    forceConfirmed = request.ForceConfirmed,
                     isSystem = true, 
                     createdAt = DateTime.SpecifyKind(msg.CreatedAt, DateTimeKind.Utc).ToString("o"), 
                     senderId = userId 
                 };
 
                 // Broadcast using SignalR
-                if (request.UserIds != null && request.UserIds.Any())
+                var clients = (request.UserIds != null && request.UserIds.Any())
+                    ? _hubContext.Clients.Users(request.UserIds.Select(id => id.ToString()).ToList())
+                    : _hubContext.Clients.All;
+
+                // Legacy listener
+                await clients.SendAsync("ReceiveNotification", signalRData);
+
+                // Advanced listeners
+                if ((request.Category == "Security" || request.Category == "Alert") && request.ForceConfirmed)
                 {
-                    foreach (var targetId in request.UserIds)
-                    {
-                        await _hubContext.Clients.User(targetId.ToString()).SendAsync("ReceiveNotification", payload);
-                    }
+                    // --- GỬI ĐẾN TẤT CẢ ONLINE (CHẾ ĐỘ KHẨN CẤP) ---
+                    await clients.SendAsync("receiveSecurityAlert", signalRData);
                 }
                 else
                 {
-                    await _hubContext.Clients.All.SendAsync("ReceiveNotification", payload);
+                    // --- GỬI ĐẾN TẤT CẢ ONLINE (CHỈ HIỆN CHẤM ĐỎ) ---
+                    await clients.SendAsync("receiveGeneralAnnouncement", signalRData);
                 }
 
                 return Ok(new { success = true, senderName, message = request.Message });

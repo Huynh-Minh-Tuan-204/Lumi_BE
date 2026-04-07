@@ -62,16 +62,30 @@ namespace Lumi.WebAPI.Controllers
         [HttpGet("get-announcements")]
         public async Task<IActionResult> GetAnnouncements()
         {
+            var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out var userId)) 
+                return Unauthorized();
+
             var announcements = await _context.Messages
-                .Where(m => m.MessageType == "Announcement" && !m.IsDeleted != true)
-                .OrderByDescending(m => m.CreatedAt) // Đảo ngược để thông báo mới nhất lên đầu
+                .Where(m => m.MessageType == "Announcement" && (m.IsDeleted ?? false) == false)
+                .OrderByDescending(m => m.CreatedAt)
+                .ToListAsync();
+
+            // Filter for target users (Private announcements logic)
+            var filtered = announcements
+                .Where(m => {
+                    if (string.IsNullOrEmpty(m.IV) || m.IV == "SYSTEM_MSG") return true; 
+                    var targetIds = m.IV.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                    return targetIds.Any(id => id == userId.ToString());
+                })
                 .Select(m => new {
                     sender = "📢 HỆ THỐNG",
                     message = m.EncryptedContent,
                     isSystem = true,
                     time = m.CreatedAt
-                }).ToListAsync();
-            return Ok(announcements);
+                }).ToList();
+
+            return Ok(filtered);
         }
 
         [HttpPost("send-announcement")]
@@ -150,7 +164,7 @@ namespace Lumi.WebAPI.Controllers
                     cm.Conversation.Name,
                     cm.Conversation.Type,
                     LastMessage = _context.Messages
-                        .Where(m => m.ConversationId == cm.ConversationId && !m.IsDeleted != true)
+                        .Where(m => m.ConversationId == cm.ConversationId && (m.IsDeleted ?? false) == false)
                         .OrderByDescending(m => m.CreatedAt)
                         .Select(m => new { m.EncryptedContent, m.CreatedAt })
                         .FirstOrDefault(),
@@ -178,7 +192,7 @@ namespace Lumi.WebAPI.Controllers
         public async Task<IActionResult> GetChatHistory(int convId)
         {
             var messages = await _context.Messages
-                .Where(m => m.ConversationId == convId && !m.IsDeleted != true)
+                .Where(m => m.ConversationId == convId && (m.IsDeleted ?? false) == false)
                 .OrderBy(m => m.CreatedAt)
                 .Select(m => new {
                     sender = m.Sender.FullName ?? m.Sender.Username,

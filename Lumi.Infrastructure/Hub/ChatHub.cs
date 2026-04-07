@@ -321,15 +321,46 @@ namespace Lumi.Infrastructure.Hubs // Đảm bảo folder là Lumi.Infrastructur
             if (message == null) return;
 
             message.IsPinned = (message.IsPinned ?? false) == false;
-            message.PinnedAt = (message.IsPinned ?? false) ? DateTime.UtcNow : null;
-            message.PinnedBy = (message.IsPinned ?? false) ? (int?)currentUserId : null;
+            bool isNewPinned = message.IsPinned.Value;
+            message.PinnedAt = isNewPinned ? DateTime.UtcNow : null;
+            message.PinnedBy = isNewPinned ? (int?)currentUserId : null;
 
             await _context.SaveChangesAsync();
 
+            // 1. Gửi event cập nhật trạng thái Ghim
             await Clients.Group(message.ConversationId.ToString()).SendAsync("MessagePinned", new {
                 messageId = message.Id,
                 isPinned = message.IsPinned,
-                pinnedBy = message.PinnedBy
+                pinnedBy = message.PinnedBy,
+                conversationId = message.ConversationId
+            });
+
+            // 2. Tạo tin nhắn hệ thống thông báo việc Ghim/Bỏ ghim
+            var user = await _context.Users.FindAsync(currentUserId);
+            string actionText = isNewPinned ? "đã ghim một tin nhắn" : "đã bỏ ghim một tin nhắn";
+            var systemMsg = new Message
+            {
+                ConversationId = message.ConversationId,
+                SenderId = currentUserId,
+                EncryptedContent = $"{user?.FullName ?? user?.Username ?? "Ai đó"} {actionText}",
+                IV = "SYSTEM_MSG",
+                MessageType = "Announcement", // Dùng type này để hiển thị ở giữa
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.Messages.Add(systemMsg);
+            await _context.SaveChangesAsync();
+
+            // 3. Broadcast tin nhắn hệ thống này cho mọi người thấy trong feed
+            await Clients.Group(message.ConversationId.ToString()).SendAsync("ReceiveMessage", new {
+                id = systemMsg.Id,
+                conversationId = systemMsg.ConversationId,
+                senderId = systemMsg.SenderId,
+                senderName = "Hệ thống",
+                content = systemMsg.EncryptedContent,
+                iv = systemMsg.IV,
+                messageType = systemMsg.MessageType,
+                createdAt = systemMsg.CreatedAt.ToString("o")
             });
         }
 
@@ -393,14 +424,15 @@ namespace Lumi.Infrastructure.Hubs // Đảm bảo folder là Lumi.Infrastructur
 
             // Find unread messages for this user in this conversation 
             // where they are NOT the sender
-            var unreadMessages = await _context.Messages
+            var unreadMessageIds = await _context.Messages
                 .Where(m => m.ConversationId == conversationId && 
                             m.SenderId != userId &&
                             (m.IsDeleted ?? false) == false &&
                             !m.MessageReads.Any(mr => mr.UserId == userId))
+                .Select(m => m.Id)
                 .ToListAsync();
 
-            if (!unreadMessages.Any()) return;
+            if (!unreadMessageIds.Any()) return;
 
             // Robust device check (mirroring Controller logic)
             var device = await _context.UserDevices
@@ -426,11 +458,11 @@ namespace Lumi.Infrastructure.Hubs // Đảm bảo folder là Lumi.Infrastructur
             }
             int deviceId = device.Id;
 
-            foreach (var msg in unreadMessages)
+            foreach (var msgId in unreadMessageIds)
             {
                 _context.MessageReads.Add(new MessageRead
                 {
-                    MessageId = msg.Id,
+                    MessageId = msgId,
                     UserId = userId,
                     DeviceId = deviceId,
                     ReadAt = DateTime.UtcNow
