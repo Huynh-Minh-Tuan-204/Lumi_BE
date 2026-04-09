@@ -145,8 +145,8 @@ namespace Lumi.WebAPI.Controllers
             return Ok(new { message = "Status updated" });
         }
 
-        [HttpPost("remove-schedule/{id}")]
-        public async Task<IActionResult> Delete([FromRoute] int id)
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
         {
             var userId = GetUserId();
 
