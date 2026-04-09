@@ -160,6 +160,8 @@ namespace Lumi.WebAPI.Controllers
 
             var participantIds = schedule.Participants.Select(p => p.UserId).ToList();
 
+            // Manually remove participants first due to Restrict delete behavior
+            _context.WorkScheduleParticipants.RemoveRange(schedule.Participants);
             _context.WorkSchedules.Remove(schedule);
             await _context.SaveChangesAsync();
 
