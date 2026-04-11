@@ -337,14 +337,30 @@ namespace Lumi.Infrastructure.Hubs // Đảm bảo folder là Lumi.Infrastructur
 
             // 2. Tạo tin nhắn hệ thống thông báo việc Ghim/Bỏ ghim
             var user = await _context.Users.FindAsync(currentUserId);
-            string actionText = isNewPinned ? "đã ghim một tin nhắn" : "đã bỏ ghim một tin nhắn";
+            var dMessage = await _context.Messages.Include(m => m.Attachments).FirstOrDefaultAsync(m => m.Id == messageId);
+            
+            string extraInfo = "";
+            if (dMessage != null && dMessage.Attachments != null && dMessage.Attachments.Any()) {
+                extraInfo = $" file {dMessage.Attachments.First().FileName}";
+            } else if (dMessage != null && !string.IsNullOrEmpty(dMessage.EncryptedContent) && dMessage.EncryptedContent.Contains("http")) {
+                var url = dMessage.EncryptedContent.Split(new[] { ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(s => s.StartsWith("http"));
+                if (url != null) {
+                    if (url.Length > 25) url = url.Substring(0, 25) + "...";
+                    extraInfo = $" link {url}";
+                }
+            }
+
+            string userNameDisplay = user?.Id == currentUserId ? "Bạn" : (user?.FullName ?? user?.Username ?? "Ai đó");
+            string actionText = isNewPinned ? $"ghim 1 tin nhắn{extraInfo}" : $"bỏ ghim 1 tin nhắn{extraInfo}";
+            
             var systemMsg = new Message
             {
                 ConversationId = message.ConversationId,
                 SenderId = currentUserId,
-                EncryptedContent = $"{user?.FullName ?? user?.Username ?? "Ai đó"} {actionText}",
+                EncryptedContent = $"{userNameDisplay} {actionText}",
                 IV = "SYSTEM_MSG",
                 MessageType = "Announcement", // Dùng type này để hiển thị ở giữa
+                ParentMessageId = message.Id,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -360,6 +376,7 @@ namespace Lumi.Infrastructure.Hubs // Đảm bảo folder là Lumi.Infrastructur
                 content = systemMsg.EncryptedContent,
                 iv = systemMsg.IV,
                 messageType = systemMsg.MessageType,
+                parentMessageId = systemMsg.ParentMessageId,
                 createdAt = systemMsg.CreatedAt.ToString("o")
             });
         }

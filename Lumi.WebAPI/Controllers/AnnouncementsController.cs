@@ -35,11 +35,13 @@ namespace Lumi.WebAPI.Controllers
         {
             try 
             {
+                var isAdmin = User.IsInRole("Admin") || User.IsInRole("Manager");
                 var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out var userId)) 
                     return Unauthorized();
 
                 var itemsRaw = await _context.Messages
+                    .Include(m => m.Sender)
                     .Where(m => m.MessageType == "Announcement" && (m.IsDeleted ?? false) == false && !m.EncryptedContent.Contains("ghim") && !m.EncryptedContent.Contains("Ghim"))
                     .Select(m => new {
                         m.Id,
@@ -47,6 +49,7 @@ namespace Lumi.WebAPI.Controllers
                         m.CreatedAt,
                         m.IV,
                         m.Metadata,
+                        m.SenderId,
                         SenderName = m.Sender != null ? (m.Sender.FullName ?? m.Sender.Username) : "System"
                     })
                     .OrderByDescending(m => m.CreatedAt)
@@ -60,27 +63,38 @@ namespace Lumi.WebAPI.Controllers
                 // Lọc các tin nhắn theo đối tượng nhận
                 var filteredItems = itemsRaw
                     .Where(m => {
+                        if (isAdmin) return true; // Admin/Manager thấy hết
                         if (string.IsNullOrEmpty(m.IV) || m.IV == "SYSTEM_MSG") return true; 
                         var targetIds = m.IV.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                        return targetIds.Any(id => id == userId.ToString());
+                        return targetIds.Any(id => id == userIdStr);
                     })
                     .Select(m => {
-                        var meta = new { title = "Thông báo", category = "General", forceConfirmed = false };
+                        var metaTitle = "Thông báo";
+                        var metaCategory = "General";
+                        var metaForce = false;
+
                         if (!string.IsNullOrEmpty(m.Metadata)) {
-                            try { meta = System.Text.Json.JsonSerializer.Deserialize<dynamic>(m.Metadata); } catch {}
+                            try { 
+                                var metaObj = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(m.Metadata);
+                                if (metaObj.TryGetProperty("title", out var t)) metaTitle = t.GetString();
+                                if (metaObj.TryGetProperty("category", out var c)) metaCategory = c.GetString();
+                                if (metaObj.TryGetProperty("forceConfirmed", out var f)) metaForce = f.GetBoolean();
+                            } catch {}
                         }
 
                         return new
                         {
                             Id = m.Id,
-                            Title = meta?.title ?? "Thông báo",
-                            Category = meta?.category ?? "General",
-                            ForceConfirmed = meta?.forceConfirmed ?? false,
+                            Title = metaTitle,
+                            Category = metaCategory,
+                            ForceConfirmed = metaForce,
                             SenderName = m.SenderName ?? "System",
+                            SenderId = m.SenderId,
                             Message = m.EncryptedContent,
                             Timestamp = DateTime.SpecifyKind(m.CreatedAt, DateTimeKind.Utc).ToString("o"),
                             IsSystem = true,
-                            IsRead = userReadMessageIds.Contains(m.Id)
+                            IsRead = userReadMessageIds.Contains(m.Id),
+                            TargetIds = (m.IV == "SYSTEM_MSG" || string.IsNullOrEmpty(m.IV)) ? null : m.IV.Split(',').ToList()
                         };
                     })
                     .ToList();

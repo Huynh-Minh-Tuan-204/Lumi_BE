@@ -129,7 +129,9 @@ namespace Lumi.Infrastructure.Services
         {
             var normalizedUsername = request.Username?.Trim().ToLower();
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
+            var user = await _context.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Username == request.Username || u.Username == normalizedUsername);
 
             if (user == null)
                 throw new ValidationException("Tên đăng nhập hoặc mật khẩu không chính xác.");
@@ -279,7 +281,9 @@ namespace Lumi.Infrastructure.Services
             if (tokenEntity.ExpiresAt < DateTime.UtcNow)
                 throw new ValidationException("Token đã hết hạn.");
 
-            var user = await _context.Users.FindAsync(tokenEntity.UserId);
+            var user = await _context.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Id == tokenEntity.UserId);
             if (user == null) throw new ValidationException("User không tồn tại.");
 
             using var transaction = await _context.Database.BeginTransactionAsync();
