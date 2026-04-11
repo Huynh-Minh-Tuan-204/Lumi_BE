@@ -33,5 +33,6 @@ namespace Lumi.Domain.Entities
         public string Metadata { get; set; } // JSON metadata for categories, titles, etc.
 
         public virtual ICollection<MessageRead> MessageReads { get; set; }
+        public virtual ICollection<Attachment> Attachments { get; set; }
     }
 }
