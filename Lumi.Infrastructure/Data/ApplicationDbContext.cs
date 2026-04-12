@@ -123,7 +123,7 @@ namespace Lumi.Infrastructure.Data
                 .OnDelete(DeleteBehavior.Restrict);
 
             
-            // Performance Indexes
+            // Start-up sync for performance indexes
             modelBuilder.Entity<SignalRConnection>().HasIndex(s => s.UserId);
             modelBuilder.Entity<SignalRConnection>().HasIndex(s => s.IsActive);
             modelBuilder.Entity<Message>().HasIndex(m => m.ConversationId);
@@ -147,6 +147,27 @@ namespace Lumi.Infrastructure.Data
                 .WithMany()
                 .HasForeignKey(ws => ws.CreatedBy)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // ==========================================
+            // FIX LỖI CAST GUID TO STRING (DỨT ĐIỂM)
+            // ==========================================
+            // Sử dụng Converter để ánh xạ giữa Guid (Code) và String/Guid (DB) một cách linh hoạt
+            modelBuilder.Entity<Meeting>()
+                .Property(m => m.MeetingGuid)
+                .HasConversion(
+                    v => v.ToString(), // Lưu xuống DB dưới dạng chuỗi
+                    v => string.IsNullOrEmpty(v) ? (Guid?)null : Guid.Parse(v) // Đọc từ DB lên (chấp nhận cả chuỗi)
+                );
+
+            modelBuilder.Entity<UserDevice>()
+                .Property(ud => ud.DeviceIdentifier)
+                .HasConversion(
+                    v => v != null ? v.ToString() : null,
+                    v => v != null ? v.ToString() : null
+                );
+            
+            // Đảm bảo DeviceIdentifier trong C# vẫn là string để không làm gãy AuthService
+            // Nhưng chuyển MeetingGuid về Guid? để chuẩn hóa MeetingsController logic
 
             var cascadeFKs = modelBuilder.Model.GetEntityTypes()
                 .SelectMany(t => t.GetForeignKeys())

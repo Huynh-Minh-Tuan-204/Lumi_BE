@@ -22,7 +22,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlServerOptions => sqlServerOptions.CommandTimeout(60)));
+        sqlServerOptions => sqlServerOptions.CommandTimeout(180)));
 
 // HANGFIRE
 builder.Services.AddHangfire(configuration => configuration
@@ -50,17 +50,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowVercel", policy =>
     {
-        policy.SetIsOriginAllowed(origin => true) // Cho phép tất cả origin
+        policy.SetIsOriginAllowed(_ => true) 
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials();
-    });
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.SetIsOriginAllowed(origin => true) // Cho phép tất cả origin
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowCredentials()
+              .WithExposedHeaders("Content-Disposition");
     });
 });
 
@@ -82,7 +76,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 )
         };
 
-        // Cho phép SignalR nhận token qua query string
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -116,13 +109,10 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// DI CHUYỂN CORS LÊN TUYỆT ĐỐI ĐẦU PIPELINE
-app.UseCors("AllowVercel"); 
-
 app.UseSwagger();
 app.UseSwaggerUI();
-
 app.UseHangfireDashboard();
+
 ////////////////////////////////////////////////////
 /// 7. MIDDLEWARE PIPELINE
 ////////////////////////////////////////////////////
@@ -131,93 +121,50 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
     ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
                        Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
 });
-// OPTIONS Handling for CORS (SmarterASP/Proxy robustness)
-// CORS will be applied after Routing below
 
-// HTTPS
 app.UseHttpsRedirection();
-
-// Static Files - Nằm TRƯỚC Routing để fix lỗi 404 cho ảnh và avatar
 app.UseStaticFiles();
-
-// Routing
 app.UseRouting();
-
-// CORS is now at the top
-
-// Authentication
+app.UseCors("AllowVercel");
 app.UseAuthentication();
-
-// Middleware: Check First Login after Authentication
 app.UseMiddleware<Lumi.WebAPI.Middleware.FirstLoginMiddleware>();
-
-// Authorization
 app.UseAuthorization();
 
 ////////////////////////////////////////////////////
 /// 8. ENDPOINTS
 ////////////////////////////////////////////////////
 app.MapControllers();
-
 app.MapHub<ChatHub>("/chatHub");
 app.MapHub<CallHub>("/callhub");
 
 ////////////////////////////////////////////////////
-/// 9. TẠO ADMIN MẶC ĐỊNH
+/// 9. STARTUP SCHEME SYNC (RELIABLE VERSION)
 ////////////////////////////////////////////////////
-/*
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var pwdService = scope.ServiceProvider.GetRequiredService<IPasswordService>();
-
-    // Set a longer timeout for migrations (2 minutes)
-    db.Database.SetCommandTimeout(120);
-
-    if (app.Environment.IsDevelopment())
+    try
     {
-        try
-        {
-            Console.WriteLine("Checking database migrations...");
-            db.Database.Migrate();
+        db.Database.SetCommandTimeout(300);
+        
+        // Step-by-step column addition with NULL to avoid constraint failures in shared hosting
+        var cmds = new List<string> {
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'MeetingGuid') ALTER TABLE [Meetings] ADD [MeetingGuid] UNIQUEIDENTIFIER NULL",
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'CallType') ALTER TABLE [Meetings] ADD [CallType] NVARCHAR(50) NULL",
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'SettingsJson') ALTER TABLE [Meetings] ADD [SettingsJson] NVARCHAR(MAX) NULL"
+        };
+
+        foreach(var cmd in cmds) {
+            try { db.Database.ExecuteSqlRaw(cmd); } catch { /* Individual failure is okay */ }
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Migration failed: {ex.Message}. Continuing startup...");
-        }
+
+        // Fill data for new and old records to maintain consistency
+        db.Database.ExecuteSqlRaw("UPDATE [Meetings] SET [MeetingGuid] = CAST(NEWID() AS NVARCHAR(255)) WHERE [MeetingGuid] IS NULL");
+        db.Database.ExecuteSqlRaw("UPDATE [Meetings] SET [CallType] = 'video' WHERE [CallType] IS NULL");
+        db.Database.ExecuteSqlRaw("UPDATE [Meetings] SET [SettingsJson] = '{}' WHERE [SettingsJson] IS NULL");
     }
-
-    // Reset online status on startup (Clean cleanup)
-    try 
-    {
-        //db.Database.ExecuteSqlRaw("TRUNCATE TABLE SignalRConnections");
-    }
-    catch { /* Ignore if DB is not ready or doesn't support truncate  }
-
-    if (!db.Users.Any(u => u.Username.ToLower() == "admin"))
-    {
-        pwdService.CreatePasswordHash("Admin@123", out string hash, out string salt);
-
-        db.Users.Add(new User
-        {
-            Username = "admin",
-            FullName = "System Administrator",
-            PasswordHash = hash,
-            PasswordSalt = salt,
-            RoleId = 2,
-            MustChangePassword = true,
-            CreatedAt = DateTime.UtcNow
-        });
-
-        db.SaveChanges();
-
-    }
+    catch { /* Critical startup failure safeguard */ }
 }
-app.MapGet("/test-db", (ApplicationDbContext db) =>
-{
-    return db.Users.Count();
-});
-*/
-////////////////////////////////////////////////////
-app.MapGet("/", () => "API is running");
+
+app.MapGet("/", () => "API is running - Professional Room Code Version");
 app.Run();

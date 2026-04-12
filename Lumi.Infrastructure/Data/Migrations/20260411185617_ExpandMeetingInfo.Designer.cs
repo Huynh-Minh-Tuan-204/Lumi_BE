@@ -4,16 +4,19 @@ using Lumi.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace Lumi.Infrastructure.Migrations
+namespace Lumi.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260411185617_ExpandMeetingInfo")]
+    partial class ExpandMeetingInfo
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -33,12 +36,18 @@ namespace Lumi.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Message")
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
-                    b.ToTable("Announcements", (string)null);
+                    b.ToTable("Announcements");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.Attachment", b =>
@@ -85,7 +94,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("UploaderId");
 
-                    b.ToTable("Attachments", (string)null);
+                    b.ToTable("Attachments");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.AttachmentRecipientKey", b =>
@@ -120,7 +129,7 @@ namespace Lumi.Infrastructure.Migrations
                     b.HasIndex("AttachmentId", "UserId", "DeviceId")
                         .IsUnique();
 
-                    b.ToTable("AttachmentRecipientKeys", (string)null);
+                    b.ToTable("AttachmentRecipientKeys");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.AuditLog", b =>
@@ -159,7 +168,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("AuditLogs", (string)null);
+                    b.ToTable("AuditLogs");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.Conversation", b =>
@@ -182,7 +191,7 @@ namespace Lumi.Infrastructure.Migrations
                     b.Property<int>("CreatedBy")
                         .HasColumnType("int");
 
-                    b.Property<DateTime>("LastMessageAt")
+                    b.Property<DateTime?>("LastMessageAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
@@ -200,7 +209,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("LastMessageAt");
 
-                    b.ToTable("Conversations", (string)null);
+                    b.ToTable("Conversations");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.ConversationMember", b =>
@@ -240,7 +249,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("UserId", "IsActive");
 
-                    b.ToTable("ConversationMembers", (string)null);
+                    b.ToTable("ConversationMembers");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.Department", b =>
@@ -267,7 +276,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("CreatedBy");
 
-                    b.ToTable("Departments", (string)null);
+                    b.ToTable("Departments");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.Meeting", b =>
@@ -277,6 +286,9 @@ namespace Lumi.Infrastructure.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CallType")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("ConversationId")
                         .HasColumnType("int");
@@ -290,6 +302,12 @@ namespace Lumi.Infrastructure.Migrations
                     b.Property<bool>("IsRecording")
                         .HasColumnType("bit");
 
+                    b.Property<Guid>("MeetingGuid")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SettingsJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2");
 
@@ -302,7 +320,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("CreatedBy");
 
-                    b.ToTable("Meetings", (string)null);
+                    b.ToTable("Meetings");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.MeetingParticipant", b =>
@@ -337,7 +355,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("MeetingParticipants", (string)null);
+                    b.ToTable("MeetingParticipants");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.MeetingRecording", b =>
@@ -375,7 +393,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("MeetingId");
 
-                    b.ToTable("MeetingRecordings", (string)null);
+                    b.ToTable("MeetingRecordings");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.Message", b =>
@@ -404,17 +422,35 @@ namespace Lumi.Infrastructure.Migrations
                     b.Property<string>("IV")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<bool>("IsDeleted")
+                    b.Property<bool?>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("IsPinned")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("IsRead")
                         .HasColumnType("bit");
 
                     b.Property<string>("MessageType")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Metadata")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int?>("ParentMessageId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("PinnedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("PinnedBy")
                         .HasColumnType("int");
 
                     b.Property<int>("SenderId")
                         .HasColumnType("int");
+
+                    b.Property<string>("StickerUrl")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -428,7 +464,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("ConversationId", "CreatedAt");
 
-                    b.ToTable("Messages", (string)null);
+                    b.ToTable("Messages");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.MessageRead", b =>
@@ -460,7 +496,7 @@ namespace Lumi.Infrastructure.Migrations
                     b.HasIndex("MessageId", "UserId", "DeviceId")
                         .IsUnique();
 
-                    b.ToTable("MessageReads", (string)null);
+                    b.ToTable("MessageReads");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.MessageRecipientKey", b =>
@@ -495,7 +531,7 @@ namespace Lumi.Infrastructure.Migrations
                     b.HasIndex("MessageId", "UserId", "DeviceId")
                         .IsUnique();
 
-                    b.ToTable("MessageRecipientKeys", (string)null);
+                    b.ToTable("MessageRecipientKeys");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.RefreshToken", b =>
@@ -544,7 +580,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("RefreshTokens", (string)null);
+                    b.ToTable("RefreshTokens");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.Role", b =>
@@ -570,7 +606,7 @@ namespace Lumi.Infrastructure.Migrations
                         .IsUnique()
                         .HasFilter("[Name] IS NOT NULL");
 
-                    b.ToTable("Roles", (string)null);
+                    b.ToTable("Roles");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.SignalRConnection", b =>
@@ -607,7 +643,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("SignalRConnections", (string)null);
+                    b.ToTable("SignalRConnections");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.User", b =>
@@ -695,7 +731,7 @@ namespace Lumi.Infrastructure.Migrations
                         .IsUnique()
                         .HasFilter("[Username] IS NOT NULL");
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.UserDevice", b =>
@@ -744,7 +780,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("UserDevices", (string)null);
+                    b.ToTable("UserDevices");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.UserKey", b =>
@@ -787,7 +823,7 @@ namespace Lumi.Infrastructure.Migrations
                     b.HasIndex("UserId", "KeyVersion")
                         .IsUnique();
 
-                    b.ToTable("UserKeys", (string)null);
+                    b.ToTable("UserKeys");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.UserSessionKey", b =>
@@ -820,7 +856,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("DeviceId");
 
-                    b.ToTable("UserSessionKeys", (string)null);
+                    b.ToTable("UserSessionKeys");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.WorkSchedule", b =>
@@ -859,7 +895,7 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("CreatedBy");
 
-                    b.ToTable("WorkSchedules", (string)null);
+                    b.ToTable("WorkSchedules");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.WorkScheduleParticipant", b =>
@@ -891,13 +927,13 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.HasIndex("WorkScheduleId");
 
-                    b.ToTable("WorkScheduleParticipants", (string)null);
+                    b.ToTable("WorkScheduleParticipants");
                 });
 
             modelBuilder.Entity("Lumi.Domain.Entities.Attachment", b =>
                 {
                     b.HasOne("Lumi.Domain.Entities.Message", "Message")
-                        .WithMany()
+                        .WithMany("Attachments")
                         .HasForeignKey("MessageId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
@@ -1256,6 +1292,8 @@ namespace Lumi.Infrastructure.Migrations
 
             modelBuilder.Entity("Lumi.Domain.Entities.Message", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("MessageReads");
                 });
 

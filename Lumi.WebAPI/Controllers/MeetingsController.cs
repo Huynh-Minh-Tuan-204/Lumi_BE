@@ -1,22 +1,20 @@
+#nullable enable
+using Lumi.Application.Interfaces;
 using Lumi.Infrastructure.Data;
+using Lumi.Infrastructure.Hubs;
 using Lumi.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
-using Lumi.Infrastructure.Hubs;
+using Microsoft.EntityFrameworkCore;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
 
 namespace Lumi.WebAPI.Controllers
 {
-    public class StartMeetingDto
-    {
-        public string Title { get; set; }
-        public string Type { get; set; } = "video";
-        public List<int> ParticipantIds { get; set; }
-    }
-
     [Authorize]
     [ApiController]
     [Route("api/[controller]")]
@@ -35,50 +33,31 @@ namespace Lumi.WebAPI.Controllers
 
         private int GetUserId()
         {
-            return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(userIdStr, out int id) ? id : 0;
         }
 
-        // =========================
-        // GET meeting by id
-        // =========================
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetMeeting(int id)
+        private Guid GenerateRoomCode()
         {
-            var meeting = await _context.Meetings.AsNoTracking()
-                .Where(m => m.Id == id)
-                .Select(m => new
-                {
-                    m.Id,
-                    m.Title,
-                    m.ConversationId,
-                    m.CreatedBy,
-                    m.StartedAt,
-                    m.EndedAt,
-                    m.IsRecording
-                })
-                .FirstOrDefaultAsync();
-
-            if (meeting == null)
-                return NotFound();
-
-            return Ok(meeting);
+            return Guid.NewGuid();
         }
 
-        // =========================
-        // GET meetings of conversation
-        // =========================
-        [HttpGet("conversation/{conversationId}")]
-        public async Task<IActionResult> GetConversationMeetings(int conversationId)
+        [HttpGet]
+        public async Task<IActionResult> GetMyMeetings()
         {
+            var userId = GetUserId();
             var meetings = await _context.Meetings
-                .Where(m => m.ConversationId == conversationId)
+                .Include(m => m.Conversation)
+                .Where(m => m.CreatedBy == userId || _context.MeetingParticipants.Any(mp => mp.MeetingId == m.Id && mp.UserId == userId))
                 .OrderByDescending(m => m.StartedAt)
-                .Select(m => new
-                {
-                    meetingId = m.Id,
+                .Select(m => new {
+                    m.Id,
+                    m.MeetingGuid,
                     m.Title,
                     m.StartedAt,
                     m.EndedAt,
+                    m.ConversationId,
+                    ConversationName = m.Conversation != null ? m.Conversation.Name : null,
                     m.CreatedBy
                 })
                 .ToListAsync();
@@ -86,321 +65,221 @@ namespace Lumi.WebAPI.Controllers
             return Ok(meetings);
         }
 
-        // =========================
-        // START meeting
-        // POST /api/meetings/start/{conversationId}
-        // =========================
-        [HttpPost("start/{conversationId}")]
-        public async Task<IActionResult> StartMeeting(int conversationId, [FromBody] StartMeetingDto dto)
+        [HttpGet("{idOrCode}")]
+        public async Task<IActionResult> GetMeeting(string idOrCode)
         {
             var userId = GetUserId();
+            Meeting? meeting = null;
 
-            var activeMeeting = await _context.Meetings
-                .Where(m => m.ConversationId == conversationId && m.EndedAt == null)
-                .OrderByDescending(m => m.StartedAt)
-                .FirstOrDefaultAsync();
-
-            if (activeMeeting != null)
-            {
-                // Stale check: if meeting exists but no one is in it and it's older than 30 mins, end it
-                var participantCount = await _context.MeetingParticipants
-                    .CountAsync(p => p.MeetingId == activeMeeting.Id && p.IsPresent);
-                
-                if (participantCount == 0 && activeMeeting.StartedAt < DateTime.UtcNow.AddMinutes(-30))
-                {
-                    activeMeeting.EndedAt = DateTime.UtcNow;
-                    await _context.SaveChangesAsync();
-                    activeMeeting = null;
-                }
+            if (int.TryParse(idOrCode, out int id)) {
+                meeting = await _context.Meetings.Include(m => m.Conversation).FirstOrDefaultAsync(m => m.Id == id);
+            } else {
+                meeting = await _context.Meetings.Include(m => m.Conversation).FirstOrDefaultAsync(m => m.MeetingGuid.ToString() == idOrCode);
             }
 
-            var meetingToNotify = activeMeeting;
+            if (meeting == null) return NotFound(new { error = "Cuộc họp không tồn tại hoặc mã phòng không đúng." });
 
-            if (meetingToNotify == null)
-            {
-                meetingToNotify = new Meeting
-                {
-                    ConversationId = conversationId,
-                    Title = string.IsNullOrWhiteSpace(dto?.Title) ? "Meeting" : dto.Title,
-                    CreatedBy = userId,
-                    StartedAt = DateTime.UtcNow,
-                    IsRecording = false
-                };
-
-                _context.Meetings.Add(meetingToNotify);
-                await _context.SaveChangesAsync();
-            }
-
-            // Ensure the caller is recorded as a participant
-            var participant = await _context.MeetingParticipants
-                .FirstOrDefaultAsync(p => p.MeetingId == meetingToNotify.Id && p.UserId == userId);
-
-            if (participant == null)
-            {
-                participant = new MeetingParticipant
-                {
-                    MeetingId = meetingToNotify.Id,
-                    UserId = userId,
-                    JoinedAt = DateTime.UtcNow,
-                    IsPresent = true
-                };
-                _context.MeetingParticipants.Add(participant);
-            }
-            else
-            {
-                participant.IsPresent = true;
-                participant.JoinedAt = DateTime.UtcNow;
-            }
-            
-            await _context.SaveChangesAsync();
-
-            // Broadcast call invitation to all other members of the conversation
-            var caller = await _context.Users.FindAsync(userId);
-            var callerName = caller?.FullName ?? caller?.Username ?? "Someone";
-
-            var otherMemberIds = await _context.ConversationMembers
-                .Where(cm => cm.ConversationId == conversationId && cm.UserId != userId)
-                .Select(cm => cm.UserId)
-                .ToListAsync();
-
-            var conversation = await _context.Conversations.FindAsync(conversationId);
-            var convName = conversation?.Name ?? "Call";
-
-            _logger.LogInformation("[IncomingCall] Meeting {MeetingId} (Active: {Existing}) started by {CallerName}, notifying {Count} members",
-                meetingToNotify.Id, activeMeeting != null, callerName, otherMemberIds.Count);
-
-            foreach (var memberId in otherMemberIds)
-            {
-                await _hubContext.Clients.User(memberId.ToString()).SendAsync(
-                    "IncomingCall",
-                    meetingToNotify.Id,
-                    userId,
-                    callerName,
-                    dto?.Type ?? "video",
-                    convName
-                );
-            }
-
-            // Broadcast to the conversation group removed to avoid sending back to the caller
-
-            return Ok(new
-            {
-                meetingId = meetingToNotify.Id,
-                meetingToNotify.Title,
-                meetingToNotify.StartedAt
+            return Ok(new {
+                meeting.Id,
+                meeting.MeetingGuid,
+                meeting.Title,
+                meeting.StartedAt,
+                meeting.EndedAt,
+                meeting.ConversationId,
+                ConversationName = meeting.Conversation != null ? meeting.Conversation.Name : null,
+                meeting.CreatedBy,
+                IsHost = meeting.CreatedBy == userId 
             });
         }
 
-        // =========================
-        // DECLINE call
-        // POST /api/meetings/{id}/decline
-        // =========================
-        [HttpPost("{id}/decline")]
-        public async Task<IActionResult> DeclineCall(int id)
-        {
-            var userId = GetUserId();
-            var meeting = await _context.Meetings.FindAsync(id);
-            if (meeting == null) return NotFound();
-
-            var decliner = await _context.Users.FindAsync(userId);
-            var declinerName = decliner?.FullName ?? decliner?.Username ?? "Someone";
-
-            // Notify the meeting creator that their call was declined
-            await _hubContext.Clients.Group($"user_{meeting.CreatedBy}").SendAsync(
-                "CallDeclined",
-                id,
-                declinerName
-            );
-
-            return Ok();
-        }
-
-        // =========================
-        // JOIN meeting
-        // POST /api/meetings/{id}/join
-        // =========================
-        [HttpPost("{id}/join")]
-        public async Task<IActionResult> JoinMeeting(int id)
-        {
-            var userId = GetUserId();
-
-            var meeting = await _context.Meetings.FindAsync(id);
-            if (meeting == null)
-                return NotFound();
-
-            var existing = await _context.MeetingParticipants
-                .FirstOrDefaultAsync(p => p.MeetingId == id && p.UserId == userId);
-
-            if (existing != null)
-            {
-                existing.IsPresent = true;
-                existing.JoinedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                var participant = new MeetingParticipant
-                {
-                    MeetingId = id,
-                    UserId = userId,
-                    JoinedAt = DateTime.UtcNow,
-                    IsPresent = true
-                };
-
-                _context.MeetingParticipants.Add(participant);
-            }
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new { message = "Joined meeting" });
-        }
-
-        // =========================
-        // LEAVE meeting
-        // POST /api/meetings/{id}/leave
-        // =========================
-        [HttpPost("{id}/leave")]
-        public async Task<IActionResult> LeaveMeeting(int id)
-        {
-            var userId = GetUserId();
-
-            var participant = await _context.MeetingParticipants
-                .FirstOrDefaultAsync(p => p.MeetingId == id && p.UserId == userId);
-
-            if (participant == null)
-                return NotFound();
-
-            participant.LeftAt = DateTime.UtcNow;
-            participant.IsPresent = false;
-
-            participant.DurationSeconds =
-    (int)(DateTime.UtcNow - participant.JoinedAt).TotalSeconds;
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new { message = "Left meeting" });
-        }
-
-        // =========================
-        // END meeting
-        // POST /api/meetings/{id}/end
-        // =========================
-        [HttpPost("{id}/end")]
-        public async Task<IActionResult> EndMeeting(int id)
-        {
-            var meeting = await _context.Meetings.FindAsync(id);
-            if (meeting == null)
-                return NotFound();
-
-            if (meeting.EndedAt != null) 
-                return Ok(new { message = "Meeting already ended" }); // Prevent duplicate triggers
-
-            meeting.EndedAt = DateTime.UtcNow;
-
-            var duration = meeting.EndedAt.Value - meeting.StartedAt;
-            var creator = await _context.Users.FindAsync(meeting.CreatedBy);
-            var creatorName = creator?.FullName ?? creator?.Username ?? "Unknown";
-
-            string length = $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
-            
-            var msg = new Message
-            {
-                ConversationId = meeting.ConversationId,
-                SenderId = meeting.CreatedBy,
-                EncryptedContent = $"🤙 Call ended | Started by: {creatorName} | Duration: {length}",
-                IV = "SYSTEM",
-                MessageType = "Announcement",
-                CreatedAt = DateTime.UtcNow
-            };
-            _context.Messages.Add(msg);
-
-            // Mock saving video file to satisfy requirement
-            var recording = new MeetingRecording
-            {
-                MeetingId = id,
-                EncryptedFilePath = $"/recordings/meeting_recording_{id}_{DateTime.UtcNow.Ticks}.mp4",
-                FileSize = new Random().Next(10, 150) * 1024 * 1024,
-                CreatedAt = DateTime.UtcNow
-            };
-            _context.MeetingRecordings.Add(recording);
-
-            await _context.SaveChangesAsync();
-
-            await _hubContext.Clients.Group(meeting.ConversationId.ToString())
-                .SendAsync("MeetingEnded", new { 
-                    meetingId = id, 
-                    conversationId = meeting.ConversationId, 
-                    endedAt = meeting.EndedAt 
-                });
-
-            return Ok(new { message = "Meeting ended" });
-        }
-
-        // =========================
-        // GET participants
-        // =========================
-        [HttpGet("{id}/participants")]
-        public async Task<IActionResult> GetParticipants(int id)
+        [HttpPost("start-global")]
+        public async Task<IActionResult> StartGlobalMeeting([FromBody] StartMeetingDto dto)
         {
             try
             {
-                // Simple fetch of participants
-                var list = await _context.MeetingParticipants.AsNoTracking()
-                                .Where(p => p.MeetingId == id)
-                                .ToListAsync();
+                var userId = GetUserId();
+                if (userId <= 0) return Unauthorized();
 
-                if (list == null || list.Count == 0) return Ok(new List<object>());
+                var meetingTitle = string.IsNullOrWhiteSpace(dto?.Title) ? "Cuộc họp nhanh" : dto.Title;
 
-                // Fetch user display names manually
-                var userIds = list.Select(p => p.UserId).Distinct().ToList();
-                var users = await _context.Users.AsNoTracking()
-                                .Where(u => userIds.Contains(u.Id))
-                                .ToListAsync();
+                // 1. Create a temporary conversation for this global meeting
+                var conversation = new Conversation {
+                    Name = meetingTitle,
+                    Type = "Group",
+                    AvatarPath = "",
+                    BackgroundPath = "",
+                    CreatedBy = userId,
+                    CreatedAt = DateTime.UtcNow,
+                    LastMessageAt = DateTime.UtcNow
+                };
+                _context.Conversations.Add(conversation);
+                await _context.SaveChangesAsync();
 
-                // Map results in memory
-                var result = list
-                    .GroupBy(p => p.UserId)
-                    .Select(g => g.OrderByDescending(p => p.JoinedAt).First())
-                    .Select(p => {
-                        var u = users.FirstOrDefault(user => user.Id == p.UserId);
-                        return new {
-                            p.UserId,
-                            fullName = u?.FullName ?? u?.Username ?? "Unknown",
-                            p.JoinedAt,
-                            p.LeftAt,
-                            p.DurationSeconds,
-                            p.IsPresent
-                        };
-                    })
-                    .OrderBy(x => x.fullName)
-                    .ToList();
+                // 2. Add creator as first member
+                _context.ConversationMembers.Add(new ConversationMember {
+                    ConversationId = conversation.Id,
+                    UserId = userId,
+                    RoleInConversation = "Admin",
+                    IsActive = true,
+                    JoinedAt = DateTime.UtcNow
+                });
 
-                return Ok(result);
+                // 3. Create the meeting
+                var meeting = new Meeting {
+                    ConversationId = conversation.Id,
+                    Title = meetingTitle,
+                    CreatedBy = userId,
+                    StartedAt = DateTime.UtcNow,
+                    MeetingGuid = GenerateRoomCode(),
+                    CallType = dto?.Type ?? "video",
+                    SettingsJson = "{}"
+                };
+                _context.Meetings.Add(meeting);
+                await _context.SaveChangesAsync();
+
+                // 4. Register the host as participant
+                var participant = new MeetingParticipant {
+                    MeetingId = meeting.Id,
+                    UserId = userId,
+                    JoinedAt = DateTime.UtcNow,
+                    IsHost = true,
+                    IsPresent = true
+                };
+                _context.MeetingParticipants.Add(participant);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { 
+                    id = meeting.Id, 
+                    meetingId = meeting.MeetingGuid, 
+                    title = meeting.Title,
+                    conversationId = conversation.Id,
+                    isHost = true
+                });
+            }
+            catch (DbUpdateException ex)
+            {
+                var innerMessage = ex.InnerException?.Message ?? ex.Message;
+                _logger.LogError(ex, "Database error in StartGlobalMeeting: {Message}", innerMessage);
+                return StatusCode(500, new { error = "Lỗi cơ sở dữ liệu (Database Error).", detail = innerMessage });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "GetParticipants failed for {Id}", id);
-                return StatusCode(500, "Error fetching participants");
+                var detailedError = ex.InnerException != null ? $"{ex.Message} | Inner: {ex.InnerException.Message}" : ex.Message;
+                _logger.LogError(ex, "System error in StartGlobalMeeting: {DetailedError}", detailedError);
+                return StatusCode(500, new { 
+                    error = "Lỗi hệ thống.", 
+                    detail = detailedError,
+                    stack = ex.StackTrace // Only for debugging, remove in production if needed
+                });
             }
         }
 
-        // =========================
-        // GET recordings
-        // =========================
-        [HttpGet("{meetingId}/recordings")]
-        public async Task<IActionResult> GetRecordings(int meetingId)
+        [HttpPost("start/{conversationId}")]
+        public async Task<IActionResult> StartMeeting(int conversationId, [FromBody] StartMeetingDto dto)
         {
-            var recordings = await _context.MeetingRecordings
-                .Where(r => r.MeetingId == meetingId)
-                .Select(r => new
+            try
+            {
+                var userId = GetUserId();
+                var conversation = await _context.Conversations.FindAsync(conversationId);
+                if (conversation == null) return NotFound(new { error = "Không tìm thấy cuộc hội thoại hoặc cuộc hội thoại đã bị xóa." });
+                
+                // Optimized check: return existing if it exists, or just handle it simply
+                var activeMeeting = await _context.Meetings
+                    .FirstOrDefaultAsync(m => m.ConversationId == conversationId && m.EndedAt == null);
+                
+                if (activeMeeting != null)
                 {
-                    recordingId = r.Id,
-                    r.EncryptedFilePath,
-                    r.FileSize,
-                    r.CreatedAt
-                })
-                .ToListAsync();
+                    return Ok(new { 
+                        id = activeMeeting.Id, 
+                        meetingId = activeMeeting.MeetingGuid, 
+                        title = activeMeeting.Title,
+                        conversationId = conversationId,
+                        isHost = activeMeeting.CreatedBy == userId
+                    });
+                }
 
-            return Ok(recordings);
+                var meeting = new Meeting
+                {
+                    ConversationId = conversationId,
+                    Title = string.IsNullOrWhiteSpace(dto?.Title) ? (conversation?.Name ?? "Cuộc họp mới") : dto.Title,
+                    CreatedBy = userId,
+                    StartedAt = DateTime.UtcNow,
+                    MeetingGuid = GenerateRoomCode(),
+                    CallType = dto?.Type ?? "video",
+                    SettingsJson = "{}"
+                };
+
+                _context.Meetings.Add(meeting);
+                await _context.SaveChangesAsync();
+
+                var participant = new MeetingParticipant {
+                    MeetingId = meeting.Id,
+                    UserId = userId,
+                    JoinedAt = DateTime.UtcNow,
+                    IsHost = true,
+                    IsPresent = true
+                };
+                _context.MeetingParticipants.Add(participant);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { 
+                    id = meeting.Id, 
+                    meetingId = meeting.MeetingGuid, 
+                    title = meeting.Title,
+                    conversationId = conversationId,
+                    isHost = true
+                });
+            }
+            catch (DbUpdateException ex)
+            {
+                var innerMessage = ex.InnerException?.Message ?? ex.Message;
+                _logger.LogError(ex, "Database error in StartMeeting: {Message}", innerMessage);
+                return StatusCode(500, new { error = "Lỗi cơ sở dữ liệu (Database Error).", detail = innerMessage });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "System error in StartMeeting: {Message}", ex.Message);
+                return StatusCode(500, new { error = "Lỗi hệ thống không xác định.", detail = ex.Message + " | " + ex.InnerException?.Message });
+            }
         }
+
+        [HttpPost("end/{idOrGuid}")]
+        public async Task<IActionResult> EndMeeting(string idOrGuid)
+        {
+            try
+            {
+                var userId = GetUserId();
+                Meeting? meeting = null;
+
+                if (int.TryParse(idOrGuid, out int id)) {
+                    meeting = await _context.Meetings.FindAsync(id);
+                } else {
+                    // Try parsing or compare via string
+                meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid.ToString() == idOrGuid);
+                }
+
+                if (meeting == null) return NotFound(new { error = "Cuộc họp không tồn tại." });
+                if (meeting.EndedAt != null) return BadRequest(new { error = "Cuộc họp này đã kết thúc trước đó." });
+
+                meeting.EndedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                // Notify via SignalR
+                await _hubContext.Clients.Group(meeting.ConversationId.ToString()).SendAsync("MeetingEnded", meeting.MeetingGuid);
+
+                return Ok(new { message = "Kết thúc cuộc họp thành công.", meetingId = meeting.MeetingGuid });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error ending meeting: {Message}", ex.Message);
+                return StatusCode(500, new { error = "Lỗi khi kết thúc cuộc họp.", detail = ex.Message });
+            }
+        }
+    }
+
+    public class StartMeetingDto
+    {
+        public string? Title { get; set; }
+        public string? Type { get; set; }
     }
 }

@@ -183,6 +183,8 @@ namespace Lumi.Infrastructure.Services
                     DeviceName = "Auto-Registered Device",
                     DeviceType = "Web",
                     DeviceIdentifier = Guid.NewGuid().ToString(),
+                    DevicePublicKey = "", // Bắt buộc nếu DB không cho phép NULL
+                    RefreshTokenHash = "", // Bắt buộc nếu DB không cho phép NULL
                     IsActive = true,
                     IsRevoked = false,
                     CreatedAt = DateTime.UtcNow,

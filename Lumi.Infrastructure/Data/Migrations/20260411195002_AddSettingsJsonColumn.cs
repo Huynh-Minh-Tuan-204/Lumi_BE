@@ -3,10 +3,10 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace Lumi.Infrastructure.Migrations
+namespace Lumi.Infrastructure.Data.Migrations
 {
     /// <inheritdoc />
-    public partial class AddEnterpriseFeaturesP2 : Migration
+    public partial class AddSettingsJsonColumn : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -18,7 +18,9 @@ namespace Lumi.Infrastructure.Migrations
                     Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     Message = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    IsDeleted = table.Column<bool>(type: "bit", nullable: false),
+                    IsRead = table.Column<bool>(type: "bit", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -130,7 +132,7 @@ namespace Lumi.Infrastructure.Migrations
                     CreatedBy = table.Column<int>(type: "int", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    LastMessageAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    LastMessageAt = table.Column<DateTime>(type: "datetime2", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -207,7 +209,10 @@ namespace Lumi.Infrastructure.Migrations
                     CreatedBy = table.Column<int>(type: "int", nullable: false),
                     StartedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
                     EndedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    IsRecording = table.Column<bool>(type: "bit", nullable: false)
+                    IsRecording = table.Column<bool>(type: "bit", nullable: false),
+                    MeetingGuid = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    CallType = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    SettingsJson = table.Column<string>(type: "nvarchar(max)", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -241,7 +246,13 @@ namespace Lumi.Infrastructure.Migrations
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
                     EditedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
                     DeletedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    IsDeleted = table.Column<bool>(type: "bit", nullable: false)
+                    IsDeleted = table.Column<bool>(type: "bit", nullable: true),
+                    IsRead = table.Column<bool>(type: "bit", nullable: true),
+                    IsPinned = table.Column<bool>(type: "bit", nullable: true),
+                    PinnedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    PinnedBy = table.Column<int>(type: "int", nullable: true),
+                    StickerUrl = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Metadata = table.Column<string>(type: "nvarchar(max)", nullable: true)
                 },
                 constraints: table =>
                 {

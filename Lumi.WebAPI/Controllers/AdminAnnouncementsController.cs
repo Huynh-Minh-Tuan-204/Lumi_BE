@@ -36,7 +36,8 @@ namespace Lumi.WebAPI.Controllers
                         Name = "Hệ thống thông báo", 
                         Type = "System", 
                         CreatedBy = userId,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = DateTime.UtcNow,
+                        LastMessageAt = DateTime.UtcNow
                     };
                     _context.Conversations.Add(systemConv);
                     await _context.SaveChangesAsync();

@@ -9,11 +9,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace Lumi.Infrastructure.Migrations
+namespace Lumi.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260325064822_AddEnterpriseFeaturesP2")]
-    partial class AddEnterpriseFeaturesP2
+    [Migration("20260411195002_AddSettingsJsonColumn")]
+    partial class AddSettingsJsonColumn
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -35,6 +35,12 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Message")
                         .HasColumnType("nvarchar(max)");
@@ -185,7 +191,7 @@ namespace Lumi.Infrastructure.Migrations
                     b.Property<int>("CreatedBy")
                         .HasColumnType("int");
 
-                    b.Property<DateTime>("LastMessageAt")
+                    b.Property<DateTime?>("LastMessageAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
@@ -281,6 +287,9 @@ namespace Lumi.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("CallType")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("ConversationId")
                         .HasColumnType("int");
 
@@ -292,6 +301,12 @@ namespace Lumi.Infrastructure.Migrations
 
                     b.Property<bool>("IsRecording")
                         .HasColumnType("bit");
+
+                    b.Property<Guid>("MeetingGuid")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SettingsJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2");
@@ -407,17 +422,35 @@ namespace Lumi.Infrastructure.Migrations
                     b.Property<string>("IV")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<bool>("IsDeleted")
+                    b.Property<bool?>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("IsPinned")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("IsRead")
                         .HasColumnType("bit");
 
                     b.Property<string>("MessageType")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Metadata")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int?>("ParentMessageId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("PinnedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("PinnedBy")
                         .HasColumnType("int");
 
                     b.Property<int>("SenderId")
                         .HasColumnType("int");
+
+                    b.Property<string>("StickerUrl")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -900,7 +933,7 @@ namespace Lumi.Infrastructure.Migrations
             modelBuilder.Entity("Lumi.Domain.Entities.Attachment", b =>
                 {
                     b.HasOne("Lumi.Domain.Entities.Message", "Message")
-                        .WithMany()
+                        .WithMany("Attachments")
                         .HasForeignKey("MessageId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
@@ -1259,6 +1292,8 @@ namespace Lumi.Infrastructure.Migrations
 
             modelBuilder.Entity("Lumi.Domain.Entities.Message", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("MessageReads");
                 });
 

@@ -64,9 +64,14 @@ namespace Lumi.WebAPI.Controllers
                     message = "Đăng nhập thành công"
                 });
             }
+            catch (DbUpdateException ex)
+            {
+                var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                return BadRequest(new { error = "Database Error: " + innerMsg });
+            }
             catch (Exception ex)
             {
-                return BadRequest(new { error = ex.Message });
+                return BadRequest(new { error = ex.Message + (ex.InnerException != null ? " | " + ex.InnerException.Message : "") });
             }
         }
 
