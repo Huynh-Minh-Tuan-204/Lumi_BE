@@ -117,6 +117,11 @@ namespace Lumi.WebAPI.Controllers
                     c.BackgroundPath,
                     c.LastMessageAt,
                     c.CreatedBy,
+                    MeetingGuid = _context.Meetings
+                        .Where(m => m.ConversationId == c.Id && m.EndedAt == null)
+                        .OrderByDescending(m => m.Id)
+                        .Select(m => m.MeetingGuid)
+                        .FirstOrDefault(),
                     LastMessage = _context.Messages
                         .Where(m => m.ConversationId == c.Id && m.IsDeleted != true)
                         .OrderByDescending(m => m.CreatedAt)
@@ -148,6 +153,7 @@ namespace Lumi.WebAPI.Controllers
                 c.Type,
                 c.AvatarPath,
                 c.BackgroundPath,
+                MeetingGuid = c.MeetingGuid,
                 LastMessageAt = c.LastMessageAt != null ? DateTime.SpecifyKind(c.LastMessageAt.GetValueOrDefault(), DateTimeKind.Utc).ToString("o") : null,
                 c.CreatedBy,
                 LastMessage = c.LastMessage == null ? null : new {

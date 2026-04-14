@@ -154,10 +154,7 @@ namespace Lumi.Infrastructure.Data
             // Sử dụng Converter để ánh xạ giữa Guid (Code) và String/Guid (DB) một cách linh hoạt
             modelBuilder.Entity<Meeting>()
                 .Property(m => m.MeetingGuid)
-                .HasConversion(
-                    v => v.ToString(), // Lưu xuống DB dưới dạng chuỗi
-                    v => string.IsNullOrEmpty(v) ? (Guid?)null : Guid.Parse(v) // Đọc từ DB lên (chấp nhận cả chuỗi)
-                );
+                .HasMaxLength(100);
 
             modelBuilder.Entity<UserDevice>()
                 .Property(ud => ud.DeviceIdentifier)

@@ -89,13 +89,33 @@ namespace Lumi.Infrastructure.Hubs
                 await _context.SaveChangesAsync();
                 var onlineUserIds = await _context.SignalRConnections.Where(s => s.IsActive).Select(s => s.UserId).Distinct().ToListAsync();
                 await Clients.Caller.SendAsync("InitialOnlineUsers", onlineUserIds);
+
+                // --- Sync ONLY the LATEST active Global Meeting for newly online user (Exclude Host) ---
+                var latestGlobalMeeting = await _context.Meetings
+                    .Include(m => m.Conversation)
+                    .Where(m => m.EndedAt == null && m.Conversation.Type == "GlobalMeeting" && m.CreatedBy != currentUserId)
+                    .OrderByDescending(m => m.StartedAt)
+                    .FirstOrDefaultAsync();
+                
+                if (latestGlobalMeeting != null) {
+                    await Clients.Caller.SendAsync("GlobalMeetingStarted", new {
+                        meetingId = latestGlobalMeeting.MeetingGuid,
+                        title = latestGlobalMeeting.Title,
+                        hostName = "Admin", 
+                        conversationId = latestGlobalMeeting.ConversationId,
+                        type = latestGlobalMeeting.CallType
+                    });
+                }
             }
             await base.OnConnectedAsync();
         }
 
-        private Guid GenerateRoomCode()
+        private string GenerateRoomCode()
         {
-            return Guid.NewGuid();
+            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            var random = new Random();
+            return new string(Enumerable.Repeat(chars, 8)
+                .Select(s => s[random.Next(s.Length)]).ToArray());
         }
 
         public override async Task OnDisconnectedAsync(Exception exception)

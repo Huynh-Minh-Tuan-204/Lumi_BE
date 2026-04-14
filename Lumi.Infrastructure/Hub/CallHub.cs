@@ -81,11 +81,41 @@ namespace Lumi.Infrastructure.Hubs
         }
 
         [HubMethodName("JoinCall")]
-        public async Task JoinCall(string meetingGuid)
+        public async Task JoinCall(string idOrCode)
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, meetingGuid);
-            var displayName = GetUserDisplayName();
             var userId = GetUserId();
+            var dbUser = await _context.Users.FindAsync(userId);
+            var displayName = dbUser?.FullName ?? dbUser?.Username ?? "User";
+
+            // Resolve the actual meeting and its GUID
+            Meeting? meeting = null;
+            if (int.TryParse(idOrCode, out int id)) {
+                meeting = await _context.Meetings.Include(m => m.Conversation).FirstOrDefaultAsync(m => m.Id == id);
+            } else {
+                meeting = await _context.Meetings.Include(m => m.Conversation).FirstOrDefaultAsync(m => m.MeetingGuid == idOrCode);
+            }
+
+            if (meeting == null) return;
+            string meetingGuid = meeting.MeetingGuid ?? idOrCode;
+
+            // Ensure the user has access to the conversation if it's a global meeting
+            if (meeting.Conversation != null && meeting.Conversation.Type == "GlobalMeeting")
+            {
+                var isMember = await _context.ConversationMembers.AnyAsync(cm => cm.ConversationId == meeting.ConversationId && cm.UserId == userId);
+                if (!isMember)
+                {
+                    _context.ConversationMembers.Add(new ConversationMember {
+                        ConversationId = meeting.ConversationId,
+                        UserId = userId,
+                        RoleInConversation = "Member",
+                        IsActive = true,
+                        JoinedAt = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync();
+                }
+            }
+
+            await Groups.AddToGroupAsync(Context.ConnectionId, meetingGuid);
 
             var participant = new ParticipantInfo {
                 ConnectionId = Context.ConnectionId,
@@ -104,14 +134,14 @@ namespace Lumi.Infrastructure.Hubs
             // 1. Notify others
             await Clients.OthersInGroup(meetingGuid).SendAsync("UserJoined", Context.ConnectionId, userId, displayName);
             
-            // 2. Send current list to joining user to prevent ghosts
+            // 2. Send current list to ALL users in the meeting to ensure sync
             var currentList = _meetingParticipants[meetingGuid].Select(x => new {
-                x.ConnectionId,
-                x.UserId,
+                userId = x.UserId,
+                connectionId = x.ConnectionId,
                 displayName = x.DisplayName
             }).ToList();
             
-            await Clients.Caller.SendAsync("MeetingMemberList", currentList);
+            await Clients.Group(meetingGuid).SendAsync("MeetingMemberList", currentList);
         }
 
         public async Task LeaveCall(string meetingGuid)
@@ -175,8 +205,25 @@ namespace Lumi.Infrastructure.Hubs
         public async Task AcceptJoinRequest(string meetingGuid, int attendeeId)
         {
             var userId = GetUserId();
-            var meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid.ToString() == meetingGuid);
+            var meeting = await _context.Meetings.Include(m => m.Conversation).FirstOrDefaultAsync(m => m.MeetingGuid.ToString() == meetingGuid);
             if (meeting == null || meeting.CreatedBy != userId) return;
+
+            // Grant permission to chat if it's a global meeting
+            if (meeting.Conversation != null && meeting.Conversation.Type == "GlobalMeeting")
+            {
+                var isMember = await _context.ConversationMembers.AnyAsync(cm => cm.ConversationId == meeting.ConversationId && cm.UserId == attendeeId);
+                if (!isMember)
+                {
+                    _context.ConversationMembers.Add(new ConversationMember {
+                        ConversationId = meeting.ConversationId,
+                        UserId = attendeeId,
+                        RoleInConversation = "Member",
+                        IsActive = true,
+                        JoinedAt = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync();
+                }
+            }
 
             await Clients.User(attendeeId.ToString()).SendAsync("JoinRequestAccepted", meetingGuid);
         }

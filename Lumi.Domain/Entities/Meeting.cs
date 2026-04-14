@@ -13,8 +13,8 @@ namespace Lumi.Domain.Entities
         public DateTime? EndedAt { get; set; }
         public bool IsRecording { get; set; }
         
-        // Standard GUID for security and compatibility
-        public Guid? MeetingGuid { get; set; }
+        // Updated to string to support 8-character alphanumeric codes
+        public string? MeetingGuid { get; set; }
         public string? CallType { get; set; } = "video";
         public string? SettingsJson { get; set; } = "{}";
     }

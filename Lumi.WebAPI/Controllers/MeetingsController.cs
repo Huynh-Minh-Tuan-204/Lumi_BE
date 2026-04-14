@@ -37,9 +37,12 @@ namespace Lumi.WebAPI.Controllers
             return int.TryParse(userIdStr, out int id) ? id : 0;
         }
 
-        private Guid GenerateRoomCode()
+        private string GenerateRoomCode()
         {
-            return Guid.NewGuid();
+            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            var random = new Random();
+            return new string(Enumerable.Repeat(chars, 8)
+                .Select(s => s[random.Next(s.Length)]).ToArray());
         }
 
         [HttpGet]
@@ -102,10 +105,26 @@ namespace Lumi.WebAPI.Controllers
 
                 var meetingTitle = string.IsNullOrWhiteSpace(dto?.Title) ? "Cuộc họp nhanh" : dto.Title;
 
+                // --- Check for existing active global meeting by this user ---
+                var existingActive = await _context.Meetings
+                    .Include(m => m.Conversation)
+                    .FirstOrDefaultAsync(m => m.CreatedBy == userId && m.EndedAt == null && m.Conversation.Type == "GlobalMeeting");
+                
+                if (existingActive != null)
+                {
+                    return Ok(new { 
+                        id = existingActive.Id, 
+                        meetingId = existingActive.MeetingGuid, 
+                        title = existingActive.Title,
+                        conversationId = existingActive.ConversationId,
+                        isHost = true
+                    });
+                }
+
                 // 1. Create a temporary conversation for this global meeting
                 var conversation = new Conversation {
                     Name = meetingTitle,
-                    Type = "Group",
+                    Type = "GlobalMeeting", // Changed from "Group" to distinguish it
                     AvatarPath = "",
                     BackgroundPath = "",
                     CreatedBy = userId,
@@ -147,6 +166,16 @@ namespace Lumi.WebAPI.Controllers
                 };
                 _context.MeetingParticipants.Add(participant);
                 await _context.SaveChangesAsync();
+
+                // 2. Broadcast to ALL users that a new meeting started (Global Invitation)
+                await _hubContext.Clients.All.SendAsync("GlobalMeetingStarted", new {
+                    meetingId = meeting.MeetingGuid,
+                    title = meeting.Title,
+                    hostName = User.Identity?.Name ?? "Admin",
+                    hostId = userId, // Added to filter on frontend
+                    conversationId = conversation.Id,
+                    type = meeting.CallType
+                });
 
                 return Ok(new { 
                     id = meeting.Id, 
@@ -264,6 +293,22 @@ namespace Lumi.WebAPI.Controllers
                 meeting.EndedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
 
+                // If this was a global meeting, deactivate the temporary conversation for the creator
+                // so it doesn't clutter their dashboard/room count
+                var conversation = await _context.Conversations
+                    .Include(c => c.Members)
+                    .FirstOrDefaultAsync(c => c.Id == meeting.ConversationId);
+                
+                if (conversation != null && conversation.Type == "GlobalMeeting")
+                {
+                    foreach (var member in conversation.Members)
+                    {
+                        member.IsActive = false;
+                        member.LeftAt = DateTime.UtcNow;
+                    }
+                    await _context.SaveChangesAsync();
+                }
+
                 // Notify via SignalR
                 await _hubContext.Clients.Group(meeting.ConversationId.ToString()).SendAsync("MeetingEnded", meeting.MeetingGuid);
 
@@ -273,6 +318,71 @@ namespace Lumi.WebAPI.Controllers
             {
                 _logger.LogError(ex, "Error ending meeting: {Message}", ex.Message);
                 return StatusCode(500, new { error = "Lỗi khi kết thúc cuộc họp.", detail = ex.Message });
+            }
+        }
+
+        [HttpDelete("{idOrGuid}")]
+        public async Task<IActionResult> DeleteMeeting(string idOrGuid)
+        {
+            try
+            {
+                var userId = GetUserId();
+                Meeting? meeting = null;
+
+                if (int.TryParse(idOrGuid, out int id))
+                {
+                    // Try by meeting ID first
+                    meeting = await _context.Meetings
+                        .Include(m => m.Conversation)
+                        .FirstOrDefaultAsync(m => m.Id == id);
+
+                    // If not found by meeting ID, try by conversation ID (for GlobalMeeting rooms)
+                    if (meeting == null)
+                    {
+                        meeting = await _context.Meetings
+                            .Include(m => m.Conversation)
+                            .Where(m => m.ConversationId == id && m.EndedAt == null)
+                            .OrderByDescending(m => m.StartedAt)
+                            .FirstOrDefaultAsync();
+                    }
+                }
+                else
+                {
+                    meeting = await _context.Meetings
+                        .Include(m => m.Conversation)
+                        .FirstOrDefaultAsync(m => m.MeetingGuid == idOrGuid);
+                }
+
+                if (meeting == null) return NotFound(new { error = "Cuộc họp không tồn tại." });
+
+                // End the meeting
+                meeting.EndedAt = DateTime.UtcNow;
+                
+                // Deactivate conversation if it's a global meeting — hide it from sidebar
+                if (meeting.Conversation != null && 
+                    (meeting.Conversation.Type == "GlobalMeeting" || 
+                     meeting.Conversation.Type == "ClosedMeeting" ||
+                     meeting.Conversation.Name == "Cuộc họp nhanh"))
+                {
+                    var members = await _context.ConversationMembers
+                        .Where(cm => cm.ConversationId == meeting.Conversation.Id)
+                        .ToListAsync();
+                    foreach (var member in members) member.IsActive = false;
+                    meeting.Conversation.Type = "ClosedMeeting";
+                }
+
+                await _context.SaveChangesAsync();
+                
+                // Notify via SignalR that meeting ended
+                await _hubContext.Clients.Group(meeting.ConversationId.ToString())
+                    .SendAsync("MeetingEnded", meeting.MeetingGuid);
+
+                return Ok(new { message = "Đã xóa cuộc họp thành công." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting meeting: {Message}", ex.Message);
+                return StatusCode(500, new { error = "Lỗi khi xóa cuộc họp.", detail = ex.Message });
             }
         }
     }

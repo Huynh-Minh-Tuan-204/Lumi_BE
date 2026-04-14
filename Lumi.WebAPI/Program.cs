@@ -50,10 +50,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowVercel", policy =>
     {
-        policy.SetIsOriginAllowed(_ => true) 
+        policy.WithOrigins("https://lumi-fe-lime.vercel.app", "http://localhost:3000") // Added explicit origins
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials()
+              .SetIsOriginAllowedToAllowWildcardSubdomains()
               .WithExposedHeaders("Content-Disposition");
     });
 });
@@ -149,7 +150,7 @@ using (var scope = app.Services.CreateScope())
         
         // Step-by-step column addition with NULL to avoid constraint failures in shared hosting
         var cmds = new List<string> {
-            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'MeetingGuid') ALTER TABLE [Meetings] ADD [MeetingGuid] UNIQUEIDENTIFIER NULL",
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'MeetingGuid') ALTER TABLE [Meetings] ADD [MeetingGuid] NVARCHAR(255) NULL",
             "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'CallType') ALTER TABLE [Meetings] ADD [CallType] NVARCHAR(50) NULL",
             "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'SettingsJson') ALTER TABLE [Meetings] ADD [SettingsJson] NVARCHAR(MAX) NULL"
         };

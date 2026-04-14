@@ -69,6 +69,38 @@ namespace Lumi.WebAPI.Controllers
             return Ok(schedules);
         }
 
+        // Admin only: get ALL schedules in the system
+        [HttpGet("all")]
+        public async Task<IActionResult> GetAllSchedules()
+        {
+            var userId = GetUserId();
+            var callerRole = User.FindFirst(ClaimTypes.Role)?.Value ?? "";
+            if (callerRole != "Admin") return Forbid();
+
+            var schedules = await _context.WorkSchedules
+                .Select(s => new
+                {
+                    s.Id,
+                    s.Title,
+                    s.Description,
+                    s.StartTime,
+                    s.EndTime,
+                    s.Location,
+                    UserRole = s.CreatedBy == userId ? "Creator" : "Admin",
+                    Participants = s.Participants.Select(p => new
+                    {
+                        p.UserId,
+                        p.User.FullName,
+                        p.User.AvatarPath,
+                        p.Status
+                    })
+                })
+                .OrderBy(s => s.StartTime)
+                .ToListAsync();
+
+            return Ok(schedules);
+        }
+
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateScheduleDto dto)
         {
