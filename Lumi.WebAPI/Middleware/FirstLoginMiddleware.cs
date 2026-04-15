@@ -40,7 +40,8 @@ namespace Lumi.WebAPI.Middleware
                         path.Contains("/auth/logout") ||
                         path.Contains("/auth/me") ||
                         path.Contains("/chathub") || 
-                        path.Contains("/callhub");
+                        path.Contains("/callhub") ||
+                        path.Contains("/api/attachments/upload");
 
                     if (!isAllowedPath)
                     {

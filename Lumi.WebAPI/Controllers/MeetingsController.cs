@@ -105,7 +105,6 @@ namespace Lumi.WebAPI.Controllers
 
                 var meetingTitle = string.IsNullOrWhiteSpace(dto?.Title) ? "Cuộc họp nhanh" : dto.Title;
 
-                // --- Check for existing active global meeting by this user ---
                 var existingActive = await _context.Meetings
                     .Include(m => m.Conversation)
                     .FirstOrDefaultAsync(m => m.CreatedBy == userId && m.EndedAt == null && m.Conversation.Type == "GlobalMeeting");
@@ -121,10 +120,9 @@ namespace Lumi.WebAPI.Controllers
                     });
                 }
 
-                // 1. Create a temporary conversation for this global meeting
                 var conversation = new Conversation {
                     Name = meetingTitle,
-                    Type = "GlobalMeeting", // Changed from "Group" to distinguish it
+                    Type = "GlobalMeeting",
                     AvatarPath = "",
                     BackgroundPath = "",
                     CreatedBy = userId,
@@ -134,7 +132,6 @@ namespace Lumi.WebAPI.Controllers
                 _context.Conversations.Add(conversation);
                 await _context.SaveChangesAsync();
 
-                // 2. Add creator as first member
                 _context.ConversationMembers.Add(new ConversationMember {
                     ConversationId = conversation.Id,
                     UserId = userId,
@@ -143,7 +140,6 @@ namespace Lumi.WebAPI.Controllers
                     JoinedAt = DateTime.UtcNow
                 });
 
-                // 3. Create the meeting
                 var meeting = new Meeting {
                     ConversationId = conversation.Id,
                     Title = meetingTitle,
@@ -156,23 +152,20 @@ namespace Lumi.WebAPI.Controllers
                 _context.Meetings.Add(meeting);
                 await _context.SaveChangesAsync();
 
-                // 4. Register the host as participant
-                var participant = new MeetingParticipant {
+                _context.MeetingParticipants.Add(new MeetingParticipant {
                     MeetingId = meeting.Id,
                     UserId = userId,
                     JoinedAt = DateTime.UtcNow,
                     IsHost = true,
                     IsPresent = true
-                };
-                _context.MeetingParticipants.Add(participant);
+                });
                 await _context.SaveChangesAsync();
 
-                // 2. Broadcast to ALL users that a new meeting started (Global Invitation)
                 await _hubContext.Clients.All.SendAsync("GlobalMeetingStarted", new {
                     meetingId = meeting.MeetingGuid,
                     title = meeting.Title,
                     hostName = User.Identity?.Name ?? "Admin",
-                    hostId = userId, // Added to filter on frontend
+                    hostId = userId,
                     conversationId = conversation.Id,
                     type = meeting.CallType
                 });
@@ -185,21 +178,10 @@ namespace Lumi.WebAPI.Controllers
                     isHost = true
                 });
             }
-            catch (DbUpdateException ex)
-            {
-                var innerMessage = ex.InnerException?.Message ?? ex.Message;
-                _logger.LogError(ex, "Database error in StartGlobalMeeting: {Message}", innerMessage);
-                return StatusCode(500, new { error = "Lỗi cơ sở dữ liệu (Database Error).", detail = innerMessage });
-            }
             catch (Exception ex)
             {
-                var detailedError = ex.InnerException != null ? $"{ex.Message} | Inner: {ex.InnerException.Message}" : ex.Message;
-                _logger.LogError(ex, "System error in StartGlobalMeeting: {DetailedError}", detailedError);
-                return StatusCode(500, new { 
-                    error = "Lỗi hệ thống.", 
-                    detail = detailedError,
-                    stack = ex.StackTrace // Only for debugging, remove in production if needed
-                });
+                _logger.LogError(ex, "StartGlobalMeeting error");
+                return StatusCode(500, new { error = "Lỗi hệ thống.", detail = ex.Message });
             }
         }
 
@@ -210,9 +192,8 @@ namespace Lumi.WebAPI.Controllers
             {
                 var userId = GetUserId();
                 var conversation = await _context.Conversations.FindAsync(conversationId);
-                if (conversation == null) return NotFound(new { error = "Không tìm thấy cuộc hội thoại hoặc cuộc hội thoại đã bị xóa." });
+                if (conversation == null) return NotFound(new { error = "Không tìm thấy cuộc hội thoại." });
                 
-                // Optimized check: return existing if it exists, or just handle it simply
                 var activeMeeting = await _context.Meetings
                     .FirstOrDefaultAsync(m => m.ConversationId == conversationId && m.EndedAt == null);
                 
@@ -230,7 +211,7 @@ namespace Lumi.WebAPI.Controllers
                 var meeting = new Meeting
                 {
                     ConversationId = conversationId,
-                    Title = string.IsNullOrWhiteSpace(dto?.Title) ? (conversation?.Name ?? "Cuộc họp mới") : dto.Title,
+                    Title = string.IsNullOrWhiteSpace(dto?.Title) ? (conversation.Name ?? "Cuộc họp mới") : dto.Title,
                     CreatedBy = userId,
                     StartedAt = DateTime.UtcNow,
                     MeetingGuid = GenerateRoomCode(),
@@ -241,14 +222,13 @@ namespace Lumi.WebAPI.Controllers
                 _context.Meetings.Add(meeting);
                 await _context.SaveChangesAsync();
 
-                var participant = new MeetingParticipant {
+                _context.MeetingParticipants.Add(new MeetingParticipant {
                     MeetingId = meeting.Id,
                     UserId = userId,
                     JoinedAt = DateTime.UtcNow,
                     IsHost = true,
                     IsPresent = true
-                };
-                _context.MeetingParticipants.Add(participant);
+                });
                 await _context.SaveChangesAsync();
 
                 return Ok(new { 
@@ -259,16 +239,89 @@ namespace Lumi.WebAPI.Controllers
                     isHost = true
                 });
             }
-            catch (DbUpdateException ex)
+            catch (Exception ex)
             {
-                var innerMessage = ex.InnerException?.Message ?? ex.Message;
-                _logger.LogError(ex, "Database error in StartMeeting: {Message}", innerMessage);
-                return StatusCode(500, new { error = "Lỗi cơ sở dữ liệu (Database Error).", detail = innerMessage });
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpPost("{idOrGuid}/join")]
+        public async Task<IActionResult> JoinMeeting(string idOrGuid)
+        {
+            try
+            {
+                var userId = GetUserId();
+                Meeting? meeting = null;
+                if (int.TryParse(idOrGuid, out int id)) meeting = await _context.Meetings.FindAsync(id);
+                else meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid == idOrGuid);
+
+                if (meeting == null) return NotFound(new { error = "Cuộc họp không tồn tại." });
+                if (meeting.EndedAt != null) return BadRequest(new { error = "Cuộc họp đã kết thúc." });
+
+                var participant = await _context.MeetingParticipants
+                    .FirstOrDefaultAsync(p => p.MeetingId == meeting.Id && p.UserId == userId);
+
+                if (participant == null)
+                {
+                    _context.MeetingParticipants.Add(new MeetingParticipant {
+                        MeetingId = meeting.Id,
+                        UserId = userId,
+                        JoinedAt = DateTime.UtcNow,
+                        IsPresent = true,
+                        IsHost = meeting.CreatedBy == userId
+                    });
+                } else {
+                    participant.IsPresent = true;
+                    participant.JoinedAt = DateTime.UtcNow;
+                }
+
+                await _context.SaveChangesAsync();
+                
+                await _hubContext.Clients.Group(meeting.ConversationId.ToString()).SendAsync("UserJoinedMeeting", new {
+                    meetingId = meeting.MeetingGuid,
+                    userId = userId
+                });
+
+                return Ok(new { message = "Joined" });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "System error in StartMeeting: {Message}", ex.Message);
-                return StatusCode(500, new { error = "Lỗi hệ thống không xác định.", detail = ex.Message + " | " + ex.InnerException?.Message });
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpPost("{idOrGuid}/leave")]
+        public async Task<IActionResult> LeaveMeeting(string idOrGuid)
+        {
+            try
+            {
+                var userId = GetUserId();
+                Meeting? meeting = null;
+                if (int.TryParse(idOrGuid, out int id)) meeting = await _context.Meetings.FindAsync(id);
+                else meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid == idOrGuid);
+
+                if (meeting == null) return NotFound();
+
+                var participant = await _context.MeetingParticipants
+                    .FirstOrDefaultAsync(p => p.MeetingId == meeting.Id && p.UserId == userId);
+
+                if (participant != null)
+                {
+                    participant.IsPresent = false;
+                    participant.LeftAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync();
+                }
+
+                await _hubContext.Clients.Group(meeting.ConversationId.ToString()).SendAsync("UserLeftMeeting", new {
+                    meetingId = meeting.MeetingGuid,
+                    userId = userId
+                });
+
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
             }
         }
 
@@ -279,45 +332,19 @@ namespace Lumi.WebAPI.Controllers
             {
                 var userId = GetUserId();
                 Meeting? meeting = null;
+                if (int.TryParse(idOrGuid, out int id)) meeting = await _context.Meetings.FindAsync(id);
+                else meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid == idOrGuid);
 
-                if (int.TryParse(idOrGuid, out int id)) {
-                    meeting = await _context.Meetings.FindAsync(id);
-                } else {
-                    // Try parsing or compare via string
-                meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid.ToString() == idOrGuid);
-                }
-
-                if (meeting == null) return NotFound(new { error = "Cuộc họp không tồn tại." });
-                if (meeting.EndedAt != null) return BadRequest(new { error = "Cuộc họp này đã kết thúc trước đó." });
-
+                if (meeting == null) return NotFound();
                 meeting.EndedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
 
-                // If this was a global meeting, deactivate the temporary conversation for the creator
-                // so it doesn't clutter their dashboard/room count
-                var conversation = await _context.Conversations
-                    .Include(c => c.Members)
-                    .FirstOrDefaultAsync(c => c.Id == meeting.ConversationId);
-                
-                if (conversation != null && conversation.Type == "GlobalMeeting")
-                {
-                    foreach (var member in conversation.Members)
-                    {
-                        member.IsActive = false;
-                        member.LeftAt = DateTime.UtcNow;
-                    }
-                    await _context.SaveChangesAsync();
-                }
-
-                // Notify via SignalR
                 await _hubContext.Clients.Group(meeting.ConversationId.ToString()).SendAsync("MeetingEnded", meeting.MeetingGuid);
-
-                return Ok(new { message = "Kết thúc cuộc họp thành công.", meetingId = meeting.MeetingGuid });
+                return Ok(new { message = "Ended" });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error ending meeting: {Message}", ex.Message);
-                return StatusCode(500, new { error = "Lỗi khi kết thúc cuộc họp.", detail = ex.Message });
+                return StatusCode(500, new { error = ex.Message });
             }
         }
 
@@ -326,64 +353,42 @@ namespace Lumi.WebAPI.Controllers
         {
             try
             {
-                var userId = GetUserId();
                 Meeting? meeting = null;
+                if (int.TryParse(idOrGuid, out int id)) meeting = await _context.Meetings.FindAsync(id);
+                else meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid == idOrGuid);
 
-                if (int.TryParse(idOrGuid, out int id))
-                {
-                    // Try by meeting ID first
-                    meeting = await _context.Meetings
-                        .Include(m => m.Conversation)
-                        .FirstOrDefaultAsync(m => m.Id == id);
-
-                    // If not found by meeting ID, try by conversation ID (for GlobalMeeting rooms)
-                    if (meeting == null)
-                    {
-                        meeting = await _context.Meetings
-                            .Include(m => m.Conversation)
-                            .Where(m => m.ConversationId == id && m.EndedAt == null)
-                            .OrderByDescending(m => m.StartedAt)
-                            .FirstOrDefaultAsync();
-                    }
-                }
-                else
-                {
-                    meeting = await _context.Meetings
-                        .Include(m => m.Conversation)
-                        .FirstOrDefaultAsync(m => m.MeetingGuid == idOrGuid);
-                }
-
-                if (meeting == null) return NotFound(new { error = "Cuộc họp không tồn tại." });
-
-                // End the meeting
+                if (meeting == null) return NotFound();
                 meeting.EndedAt = DateTime.UtcNow;
-                
-                // Deactivate conversation if it's a global meeting — hide it from sidebar
-                if (meeting.Conversation != null && 
-                    (meeting.Conversation.Type == "GlobalMeeting" || 
-                     meeting.Conversation.Type == "ClosedMeeting" ||
-                     meeting.Conversation.Name == "Cuộc họp nhanh"))
-                {
-                    var members = await _context.ConversationMembers
-                        .Where(cm => cm.ConversationId == meeting.Conversation.Id)
-                        .ToListAsync();
-                    foreach (var member in members) member.IsActive = false;
-                    meeting.Conversation.Type = "ClosedMeeting";
-                }
-
                 await _context.SaveChangesAsync();
-                
-                // Notify via SignalR that meeting ended
-                await _hubContext.Clients.Group(meeting.ConversationId.ToString())
-                    .SendAsync("MeetingEnded", meeting.MeetingGuid);
-
-                return Ok(new { message = "Đã xóa cuộc họp thành công." });
+                return Ok();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error deleting meeting: {Message}", ex.Message);
-                return StatusCode(500, new { error = "Lỗi khi xóa cuộc họp.", detail = ex.Message });
+                return StatusCode(500, new { error = ex.Message });
             }
+        }
+
+        [HttpGet("{idOrGuid}/participants")]
+        public async Task<IActionResult> GetParticipants(string idOrGuid)
+        {
+            Meeting? meeting = null;
+            if (int.TryParse(idOrGuid, out int id)) meeting = await _context.Meetings.FindAsync(id);
+            else meeting = await _context.Meetings.FirstOrDefaultAsync(m => m.MeetingGuid == idOrGuid);
+
+            if (meeting == null) return NotFound();
+
+            var participants = await _context.MeetingParticipants
+                .Include(p => p.User)
+                .Where(p => p.MeetingId == meeting.Id && p.IsPresent == true)
+                .Select(p => new {
+                    p.UserId,
+                    fullName = p.User.FullName,
+                    avatarPath = p.User.AvatarPath,
+                    p.IsHost
+                })
+                .ToListAsync();
+
+            return Ok(participants);
         }
     }
 

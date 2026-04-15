@@ -152,7 +152,10 @@ using (var scope = app.Services.CreateScope())
         var cmds = new List<string> {
             "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'MeetingGuid') ALTER TABLE [Meetings] ADD [MeetingGuid] NVARCHAR(255) NULL",
             "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'CallType') ALTER TABLE [Meetings] ADD [CallType] NVARCHAR(50) NULL",
-            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'SettingsJson') ALTER TABLE [Meetings] ADD [SettingsJson] NVARCHAR(MAX) NULL"
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'SettingsJson') ALTER TABLE [Meetings] ADD [SettingsJson] NVARCHAR(MAX) NULL",
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Messages]') AND name = 'EncryptedContent') ALTER TABLE [Messages] ADD [EncryptedContent] NVARCHAR(MAX) NULL",
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Messages]') AND name = 'IV') ALTER TABLE [Messages] ADD [IV] NVARCHAR(MAX) NULL",
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Messages]') AND name = 'Signature') ALTER TABLE [Messages] ADD [Signature] NVARCHAR(MAX) NULL"
         };
 
         foreach(var cmd in cmds) {

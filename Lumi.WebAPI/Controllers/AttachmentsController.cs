@@ -54,6 +54,7 @@ namespace Lumi.WebAPI.Controllers
                     SenderId = currentUserId,
                     EncryptedContent = "[Attachment]",
                     IV = string.Empty,
+                    Signature = string.Empty,
                     MessageType = "Attachment",
                     CreatedAt = DateTime.UtcNow
                 };

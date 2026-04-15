@@ -359,6 +359,9 @@ namespace Lumi.WebAPI.Controllers
             member.LeftAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
+            
+            // Thông báo cho User biết để xóa sidebar
+            await _hubContext.Clients.User(currentUserId.ToString()).SendAsync("UserLeftConversation", id);
 
             return NoContent();
         }

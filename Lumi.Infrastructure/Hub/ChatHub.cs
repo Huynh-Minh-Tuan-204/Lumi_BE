@@ -259,29 +259,185 @@ namespace Lumi.Infrastructure.Hubs
             await Clients.Group(meeting.ConversationId.ToString()).SendAsync("MeetingEnded", meeting.MeetingGuid);
         }
 
-        public async Task SendMessage(int conversationId, string encryptedMessage, string iv)
+        // ==========================================
+        // E2EE HANDSHAKE METHODS
+        // ==========================================
+
+        public async Task SendSecureIdentity(int conversationId, string idPubKeyBase64, string rsaPubKeyBase64, string signature)
         {
             var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrEmpty(userIdStr)) return;
             int senderId = int.Parse(userIdStr);
 
-            var msg = new Message { ConversationId = conversationId, SenderId = senderId, EncryptedContent = encryptedMessage, IV = iv, MessageType = "Text", CreatedAt = DateTime.UtcNow };
+            // Broadcast cho các thành viên khác để họ biết mình vừa tham gia (Chào sân)
+            await Clients.OthersInGroup(conversationId.ToString())
+                         .SendAsync("ReceiveSecureIdentity", senderId, idPubKeyBase64, rsaPubKeyBase64, signature, conversationId, false);
+        }
+
+        public async Task SendSecureIdentityToUser(int conversationId, int targetUserId, string idPubKeyBase64, string rsaPubKeyBase64, string signature)
+        {
+            var senderIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(senderIdStr)) return;
+            int senderId = int.Parse(senderIdStr);
+
+            // Gửi đích danh phản hồi (Đáp lễ) để tránh làm phiền toàn nhóm
+            await Clients.Group($"user_{targetUserId}")
+                         .SendAsync("ReceiveSecureIdentity", senderId, idPubKeyBase64, rsaPubKeyBase64, signature, conversationId, true);
+        }
+
+        public async Task SendSecureSenderKey(int conversationId, int targetUserId, string encryptedKeyBase64)
+        {
+            var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdStr)) return;
+            int senderId = int.Parse(userIdStr);
+
+            // Chá»‰ gá»­i Key Ä‘Ă£ mĂ£ hĂ³a báº±ng RSA cho Ä‘Ăºng ngÆ°á»i nháº­n (targetUserId)
+            await Clients.Group($"user_{targetUserId}")
+                         .SendAsync("ReceiveSecureSenderKey", senderId, encryptedKeyBase64, conversationId);
+        }
+
+        // ==========================================
+        // SECURE MESSAGING
+        // ==========================================
+
+        public async Task SendMessageSecure(int conversationId, string encryptedContent, string iv, string signature, string messageType, int parentMessageId)
+        {
+            try 
+            {
+                var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdStr)) return;
+                int senderId = int.Parse(userIdStr);
+
+                // Ensure non-null values for DB safety
+                var msg = new Message 
+                { 
+                    ConversationId = conversationId, 
+                    SenderId = senderId, 
+                    EncryptedContent = encryptedContent ?? "", 
+                    IV = iv ?? "", 
+                    Signature = signature ?? "",
+                    MessageType = string.IsNullOrEmpty(messageType) ? "PLAIN" : messageType, 
+                    ParentMessageId = parentMessageId > 0 ? parentMessageId : null,
+                    CreatedAt = DateTime.UtcNow 
+                };
+                
+                _context.Messages.Add(msg);
+                
+                var conversation = await _context.Conversations.FindAsync(conversationId);
+                if (conversation != null) conversation.LastMessageAt = DateTime.UtcNow;
+                
+                await _context.SaveChangesAsync();
+
+                var sender = await _context.Users.FindAsync(senderId);
+                var avatarPath = sender?.AvatarPath;
+
+                await Clients.Group(conversationId.ToString()).SendAsync("ReceiveMessage", new 
+                {
+                    id = msg.Id,
+                    conversationId = conversationId,
+                    senderId = senderId,
+                    senderName = sender?.FullName ?? "User",
+                    content = msg.EncryptedContent,
+                    iv = msg.IV,
+                    sig = msg.Signature,
+                    messageType = msg.MessageType,
+                    createdAt = msg.CreatedAt.ToString("o"),
+                    parentMessageId = msg.ParentMessageId,
+                    avatarPath = avatarPath,
+                    attachments = new List<object>()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[SendMessageSecure] Error saving or broadcasting message in conversation {ConversationId}", conversationId);
+                throw new HubException("Failed to save or broadcast secure message. Check server logs.");
+            }
+        }
+
+        // ==========================================
+        // STANDARD CHAT FEATURES (MISSING)
+        // ==========================================
+
+        public async Task SendTyping(int conversationId)
+        {
+            var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdStr)) return;
+            int userId = int.Parse(userIdStr);
+            var user = await _context.Users.FindAsync(userId);
+
+            await Clients.OthersInGroup(conversationId.ToString()).SendAsync("UserTyping", new {
+                conversationId,
+                userId,
+                userName = user?.FullName ?? user?.Username ?? "User"
+            });
+        }
+
+        public async Task SendNotification(string message)
+        {
+            var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var senderName = "Há»‡ thá»‘ng";
+            if (!string.IsNullOrEmpty(userIdStr)) {
+                var sender = await _context.Users.FindAsync(int.Parse(userIdStr));
+                senderName = sender?.FullName ?? sender?.Username ?? "Admin";
+            }
+
+            await Clients.All.SendAsync("ReceiveNotification", new {
+                id = Guid.NewGuid().ToString(),
+                message,
+                sender = senderName,
+                time = DateTime.UtcNow
+            });
+        }
+
+        public async Task SendSticker(int conversationId, string stickerUrl)
+        {
+            var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdStr)) return;
+            int senderId = int.Parse(userIdStr);
+
+            var msg = new Message {
+                ConversationId = conversationId,
+                SenderId = senderId,
+                StickerUrl = stickerUrl,
+                MessageType = "Sticker",
+                EncryptedContent = "[Sticker]",
+                IV = "",
+                Signature = "",
+                CreatedAt = DateTime.UtcNow
+            };
             _context.Messages.Add(msg);
-            var conversation = await _context.Conversations.FindAsync(conversationId);
-            if (conversation != null) conversation.LastMessageAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            var sender = await _context.Users.FindAsync(senderId);
             await Clients.Group(conversationId.ToString()).SendAsync("ReceiveMessage", new {
                 id = msg.Id,
-                conversationId = conversationId,
-                senderId = senderId,
-                senderName = sender?.FullName ?? "User",
-                content = encryptedMessage,
-                iv = iv,
-                messageType = msg.MessageType,
-                createdAt = msg.CreatedAt.ToString("o"),
-                attachments = new List<object>()
+                conversationId,
+                senderId,
+                stickerUrl,
+                messageType = "Sticker",
+                createdAt = msg.CreatedAt.ToString("o")
+            });
+        }
+
+        public async Task HideMessageForMe(int messageId)
+        {
+            // Logic to track hidden messages per user could be implemented here
+            await Clients.Caller.SendAsync("MessageHidden", messageId);
+        }
+
+        public async Task TogglePinMessage(int messageId)
+        {
+            var msg = await _context.Messages.FindAsync(messageId);
+            if (msg == null) return;
+            
+            msg.IsPinned = !(msg.IsPinned ?? false);
+            msg.PinnedAt = msg.IsPinned.Value ? DateTime.UtcNow : (DateTime?)null;
+            
+            await _context.SaveChangesAsync();
+
+            await Clients.Group(msg.ConversationId.ToString()).SendAsync("MessagePinned", new {
+                conversationId = msg.ConversationId,
+                messageId = msg.Id,
+                isPinned = msg.IsPinned
             });
         }
     }

@@ -15,6 +15,7 @@ namespace Lumi.Domain.Entities
 
         public string EncryptedContent { get; set; }
         public string IV { get; set; }
+        public string Signature { get; set; }
         public string MessageType { get; set; } = "Text";
 
         public int? ParentMessageId { get; set; }
