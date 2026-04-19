@@ -25,8 +25,6 @@ namespace Lumi.Domain.Entities
         public DateTime? EditedAt { get; set; }
         public DateTime? DeletedAt { get; set; }
         public bool? IsDeleted { get; set; } = false;
-        public bool? IsRead { get; set; } = false;
-
         public bool? IsPinned { get; set; } = false;
         public DateTime? PinnedAt { get; set; }
         public int? PinnedBy { get; set; }

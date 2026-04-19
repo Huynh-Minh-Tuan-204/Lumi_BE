@@ -17,14 +17,16 @@ namespace Lumi.Infrastructure.Hubs
     {
         private readonly ApplicationDbContext _context;
         private readonly IHubContext<ChatHub> _chatHubContext;
+        private readonly IConfiguration _config;
         
         // Tracking: meetingGuid -> list of {ConnectionId, UserId, DisplayName}
         private static readonly ConcurrentDictionary<string, List<ParticipantInfo>> _meetingParticipants = new();
 
-        public CallHub(ApplicationDbContext context, IHubContext<ChatHub> chatHubContext)
+        public CallHub(ApplicationDbContext context, IHubContext<ChatHub> chatHubContext, IConfiguration config)
         {
             _context = context;
             _chatHubContext = chatHubContext;
+            _config = config;
         }
 
         private int GetUserId()
@@ -235,6 +237,12 @@ namespace Lumi.Infrastructure.Hubs
             if (meeting == null || meeting.CreatedBy != userId) return;
 
             await Clients.User(attendeeId.ToString()).SendAsync("JoinRequestDeclined", meetingGuid, "Người tổ chức đã từ chối yêu cầu tham gia.");
+        }
+
+        public async Task<object> GetIceServers()
+        {
+            var servers = _config.GetSection("WebRTC:IceServers").Get<List<object>>();
+            return servers ?? new List<object> { new { urls = new[] { "stun:stun.l.google.com:19302" } } };
         }
     }
 

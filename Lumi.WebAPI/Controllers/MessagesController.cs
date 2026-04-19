@@ -160,7 +160,7 @@ namespace Lumi.WebAPI.Controllers
                         m.ParentMessageId,
                         createdAt = DateTime.SpecifyKind(m.CreatedAt, DateTimeKind.Utc).ToString("o"),
                         isDeleted = false,
-                        isRead = false,
+                        isRead = m.ReadBy.Contains(userId),
                         isPinned = m.IsPinned == true,
                         isSystem = false,
                         stickerUrl = m.StickerUrl,

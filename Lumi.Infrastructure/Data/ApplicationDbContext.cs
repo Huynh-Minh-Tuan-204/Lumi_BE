@@ -40,7 +40,7 @@ namespace Lumi.Infrastructure.Data
         // 8. MEETINGS & WEBRTC
         public DbSet<Meeting> Meetings { get; set; }
         public DbSet<MeetingParticipant> MeetingParticipants { get; set; }
-        public DbSet<MeetingRecording> MeetingRecordings { get; set; }
+        public DbSet<CallRecording> CallRecordings { get; set; }
         
         // 9. SCHEDULES
         public DbSet<WorkSchedule> WorkSchedules { get; set; }
@@ -116,11 +116,11 @@ namespace Lumi.Infrastructure.Data
                 .HasForeignKey(m => m.CreatedBy)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            modelBuilder.Entity<MeetingRecording>()
-                .HasOne(mr => mr.Creator)
-                .WithMany()
-                .HasForeignKey(mr => mr.CreatedBy)
-                .OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<CallRecording>()
+                .HasOne(cr => cr.Meeting)
+                .WithMany(m => m.Recordings)
+                .HasForeignKey(cr => cr.MeetingId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             
             // Start-up sync for performance indexes

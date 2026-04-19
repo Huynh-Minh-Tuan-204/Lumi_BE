@@ -10,6 +10,8 @@ using Lumi.Infrastructure.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
+using System.Text;
 namespace Lumi.Infrastructure.Hubs
 {
     public class ChatHub : Hub
@@ -268,6 +270,34 @@ namespace Lumi.Infrastructure.Hubs
             var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrEmpty(userIdStr)) return;
             int senderId = int.Parse(userIdStr);
+            
+            // SECURITY UPGRADE: Persist Identity Public Key to DB
+            var existingKey = await _context.UserKeys.FirstOrDefaultAsync(uk => uk.UserId == senderId && uk.IsActive);
+            if (existingKey == null)
+            {
+                _context.UserKeys.Add(new UserKey
+                {
+                    UserId = senderId,
+                    PublicKey = idPubKeyBase64,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    KeyVersion = 1
+                });
+            }
+            else if (existingKey.PublicKey != idPubKeyBase64)
+            {
+                // Key rotation or potentially MITM? For now, update it (Production should verify first)
+                existingKey.IsActive = false;
+                _context.UserKeys.Add(new UserKey
+                {
+                    UserId = senderId,
+                    PublicKey = idPubKeyBase64,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    KeyVersion = existingKey.KeyVersion + 1
+                });
+            }
+            await _context.SaveChangesAsync();
 
             // Broadcast cho các thành viên khác để họ biết mình vừa tham gia (Chào sân)
             await Clients.OthersInGroup(conversationId.ToString())
@@ -307,6 +337,18 @@ namespace Lumi.Infrastructure.Hubs
                 var userIdStr = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdStr)) return;
                 int senderId = int.Parse(userIdStr);
+                
+                // PRODUCTION UPGRADE: Verify Message Signature
+                var senderKey = await _context.UserKeys.FirstOrDefaultAsync(uk => uk.UserId == senderId && uk.IsActive);
+                if (senderKey != null)
+                {
+                    bool isSigValid = VerifyMessageSignature(encryptedContent, signature, senderKey.PublicKey);
+                    if (!isSigValid)
+                    {
+                        _logger.LogWarning("[Security] Invalid signature from user {UserId} in conversation {ConversationId}", senderId, conversationId);
+                        throw new HubException("Invalid message signature. Security check failed.");
+                    }
+                }
 
                 // Ensure non-null values for DB safety
                 var msg = new Message 
@@ -439,6 +481,44 @@ namespace Lumi.Infrastructure.Hubs
                 messageId = msg.Id,
                 isPinned = msg.IsPinned
             });
+        }
+
+        private bool VerifyMessageSignature(string data, string signatureBase64, string publicKeyBase64)
+        {
+            try
+            {
+                var pubKeyBytes = Convert.FromBase64String(publicKeyBase64);
+                var sigBytes = Convert.FromBase64String(signatureBase64);
+                var dataBytes = Encoding.UTF8.GetBytes(data);
+
+                using var ecdsa = ECDsa.Create();
+                
+                // WebCrypto "raw" for P-256 is usually 64 bytes (X | Y)
+                // If 65 bytes, it has the 0x04 format byte
+                byte[] x = new byte[32];
+                byte[] y = new byte[32];
+                
+                if (pubKeyBytes.Length == 65 && pubKeyBytes[0] == 0x04)
+                {
+                    Buffer.BlockCopy(pubKeyBytes, 1, x, 0, 32);
+                    Buffer.BlockCopy(pubKeyBytes, 33, y, 0, 32);
+                }
+                else if (pubKeyBytes.Length == 64)
+                {
+                    Buffer.BlockCopy(pubKeyBytes, 0, x, 0, 32);
+                    Buffer.BlockCopy(pubKeyBytes, 32, y, 0, 32);
+                }
+                else return false;
+
+                ecdsa.ImportParameters(new ECParameters
+                {
+                    Curve = ECCurve.NamedCurves.nistP256,
+                    Q = new ECPoint { X = x, Y = y }
+                });
+
+                return ecdsa.VerifyData(dataBytes, sigBytes, HashAlgorithmName.SHA256);
+            }
+            catch { return false; }
         }
     }
 }

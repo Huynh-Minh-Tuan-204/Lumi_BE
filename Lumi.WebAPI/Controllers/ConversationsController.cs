@@ -130,7 +130,7 @@ namespace Lumi.WebAPI.Controllers
                             CreatedAt = m.CreatedAt, 
                             m.MessageType, 
                             m.SenderId, 
-                            IsRead = m.IsRead == true 
+                            IsRead = m.MessageReads.Any(mr => mr.UserId == userId)
                         })
                         .FirstOrDefault(),
                     UnreadCount = _context.Messages
@@ -161,7 +161,7 @@ namespace Lumi.WebAPI.Controllers
                     CreatedAt = DateTime.SpecifyKind(c.LastMessage.CreatedAt, DateTimeKind.Utc).ToString("o"),
                     MessageType = c.LastMessage.MessageType ?? "Text",
                     SenderId = c.LastMessage.SenderId,
-                    isRead = c.LastMessage.IsRead
+                    isRead = c.LastMessage.IsRead,
                 },
                 unreadCount = c.UnreadCount,
                 otherUserId = c.OtherUserId

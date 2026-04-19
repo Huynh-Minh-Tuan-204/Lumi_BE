@@ -33,7 +33,7 @@ namespace Lumi.WebAPI.Controllers
         }
 
         [HttpPost("upload")]
-        public async Task<IActionResult> Upload([FromForm] IFormFile file, [FromForm] int? messageId, [FromForm] int? conversationId)
+        public async Task<IActionResult> Upload([FromForm] IFormFile file, [FromForm] int? messageId, [FromForm] int? conversationId, [FromForm] string? iv, [FromForm] string? signature)
         {
             if (file == null || file.Length == 0) return BadRequest(new { error = "File is required." });
 
@@ -84,6 +84,8 @@ namespace Lumi.WebAPI.Controllers
                 EncryptedFilePath = relativePath,
                 FileSize = file.Length,
                 MimeType = file.ContentType,
+                IV = iv ?? "",
+                Signature = signature ?? "",
                 UploadedBy = currentUserId,
                 UploadedAt = DateTime.UtcNow
             };

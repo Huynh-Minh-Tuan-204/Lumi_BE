@@ -102,10 +102,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 ////////////////////////////////////////////////////
 builder.Services.AddAuthorization();
 
-////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////
 /// 6. SIGNALR + CONTROLLERS
 ////////////////////////////////////////////////////
-builder.Services.AddSignalR();
+var signalRBuilder = builder.Services.AddSignalR();
+// OPTIONAL: Add Redis for horizontal scaling in production
+// signalRBuilder.AddStackExchangeRedis(builder.Configuration.GetConnectionString("RedisConnection") ?? "localhost:6379");
+
 builder.Services.AddControllers();
 
 var app = builder.Build();
@@ -155,7 +158,8 @@ using (var scope = app.Services.CreateScope())
             "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Meetings]') AND name = 'SettingsJson') ALTER TABLE [Meetings] ADD [SettingsJson] NVARCHAR(MAX) NULL",
             "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Messages]') AND name = 'EncryptedContent') ALTER TABLE [Messages] ADD [EncryptedContent] NVARCHAR(MAX) NULL",
             "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Messages]') AND name = 'IV') ALTER TABLE [Messages] ADD [IV] NVARCHAR(MAX) NULL",
-            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Messages]') AND name = 'Signature') ALTER TABLE [Messages] ADD [Signature] NVARCHAR(MAX) NULL"
+            "IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[Messages]') AND name = 'Signature') ALTER TABLE [Messages] ADD [Signature] NVARCHAR(MAX) NULL",
+            "IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'CallRecordings') CREATE TABLE [CallRecordings] (Id INT PRIMARY KEY IDENTITY, MeetingId INT, FilePath NVARCHAR(MAX), EncryptedFilePath NVARCHAR(MAX), IV NVARCHAR(MAX), FileSize BIGINT, CreatedAt DATETIME)"
         };
 
         foreach(var cmd in cmds) {

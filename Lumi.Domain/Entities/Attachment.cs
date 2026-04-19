@@ -1,4 +1,4 @@
-﻿namespace Lumi.Domain.Entities
+namespace Lumi.Domain.Entities
 {
     public class Attachment
     {
@@ -11,6 +11,7 @@
         public string MimeType { get; set; }
         public string FileHash { get; set; }
         public string IV { get; set; }
+        public string? Signature { get; set; }
         public int UploadedBy { get; set; }
         public User Uploader { get; set; }
         public DateTime UploadedAt { get; set; }

@@ -17,5 +17,8 @@ namespace Lumi.Domain.Entities
         public string? MeetingGuid { get; set; }
         public string? CallType { get; set; } = "video";
         public string? SettingsJson { get; set; } = "{}";
+        
+        public virtual ICollection<MeetingParticipant> Participants { get; set; } = new List<MeetingParticipant>();
+        public virtual ICollection<CallRecording> Recordings { get; set; } = new List<CallRecording>();
     }
 }
